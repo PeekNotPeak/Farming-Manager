@@ -1,8 +1,11 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using PRoCon.Core;
 using PRoCon.Core.Plugin;
@@ -19,12 +22,16 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.1.0";
+        private const string StrPluginVersion = "0.1.1";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
         /* ===== 1. Farming-Manager ===== */
         private bool _blnIsPluginEnabled;
+        
+        /* ===== 98. Plugin Update ===== */
+        private bool _blnDoPluginUpdateCheck;
+        private const string StrPluginUpdateUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
         
         /* ===== 99. Debugging ===== */
         public readonly Logger Logger;
@@ -37,6 +44,9 @@ namespace PRoConEvents
         {
             /* ===== 1. FarmingManager ===== */
             _blnIsPluginEnabled = false;
+            
+            /* ===== 98. Plugin Update ===== */
+            _blnDoPluginUpdateCheck = true;
             
             /* ===== 99. Debugging ===== */
             Logger = new Logger(this) { IntDebugLevel = 0, BoolDoDebugOutPut = false}; //Debug level is 0 by default and will not output any debug messages.
@@ -93,6 +103,16 @@ namespace PRoConEvents
         
         /* ==== Variable Handling ==== */
 
+        public List<CPluginVariable> GetDisplayPluginVariables()
+        {
+            return new List<CPluginVariable>(PluginVariables());
+        }
+
+        public List<CPluginVariable> GetPluginVariables()
+        {
+            return new List<CPluginVariable>(PluginVariables());
+        }
+        
         private IEnumerable<CPluginVariable> PluginVariables()
         {
             //Type safe plugin variable creation
@@ -105,22 +125,15 @@ namespace PRoConEvents
             /* ===== 1. Farming-Manager ===== */
             yield return boolPluginVariable("1. Farming-Manager|Activate the plugin?", _blnIsPluginEnabled);
             
+            /* ===== 98. Plugin Update ===== */
+            yield return boolPluginVariable("98. Plugin Update|Check for plugin updates?", _blnDoPluginUpdateCheck);
+            
             /* ===== 99. Debugging ===== */
             yield return boolPluginVariable("99. Debugging|Enable debug output?", Logger.BoolDoDebugOutPut);
             if (Logger.BoolDoDebugOutPut)
             {
                 yield return intPluginVariable("99. Debugging|Debug level", Logger.IntDebugLevel);
             }
-        }
-
-        public List<CPluginVariable> GetDisplayPluginVariables()
-        {
-            return new List<CPluginVariable>(PluginVariables());
-        }
-
-        public List<CPluginVariable> GetPluginVariables()
-        {
-            return new List<CPluginVariable>(PluginVariables());
         }
 
         public void SetPluginVariable(string strVariable, string strValue)
@@ -133,6 +146,11 @@ namespace PRoConEvents
                     /* ===== 1. Farming-Manager ===== */
                     case "Activate the plugin?":
                         _blnIsPluginEnabled = bool.Parse(strValue);
+                        break;
+                    
+                    /* ===== 98. Plugin Update ===== */
+                    case "Check for plugin updates?":
+                        _blnDoPluginUpdateCheck = bool.Parse(strValue);
                         break;
                     
                     /* ===== 99. Debugging ===== */
@@ -155,6 +173,50 @@ namespace PRoConEvents
         }
 
         #endregion IPRoConPluginInterface
+        
+        #region PRoConPluginAPI
+        
+        public override void OnAccountLogin(string strSoldierName, string ip, CPrivileges privileges)
+        {
+            if (!_blnDoPluginUpdateCheck) return;
+            CheckForPluginUpdate();
+            
+        }
+        
+        #endregion PRoConPluginAPI
+
+        #region Helper Methods
+
+        private void CheckForPluginUpdate()
+        {
+            var latestVersion = "Unknown";
+            
+            var pluginUpdateThread = new Thread(() =>
+            {
+                using (var webClient = new WebClient())
+                {
+                    var response = webClient.DownloadString(StrPluginUpdateUrl);
+                    var data = (Hashtable)JSON.JsonDecode(response);
+
+                    if (data != null && data.ContainsKey("version")) latestVersion = data["version"].ToString();
+                }
+
+                Logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
+
+                if (!Regex.Match(latestVersion, GetPluginVersion()).Success)
+                {
+                    Logger.Warn($"You are currently using version {GetPluginVersion()} of {GetPluginName()}." +
+                                $"Consider upgrading to the newest version ({latestVersion}) via GitHub.");
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "PluginUpdateThread"
+            };
+            pluginUpdateThread.Start();
+        }
+
+        #endregion
     }
 
     #endregion class FarmingManager
