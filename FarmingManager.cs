@@ -21,7 +21,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.1.2";
+        private const string StrPluginVersion = "0.1.3";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
@@ -158,6 +158,8 @@ namespace PRoConEvents
 
         public void SetPluginVariable(string strVariable, string strValue)
         {
+            if (strVariable.Contains('|')) strVariable = strVariable.Substring(strVariable.IndexOf('|') + 1);
+            
             _logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'".Trim(), 7);
             try
             {
@@ -202,10 +204,16 @@ namespace PRoConEvents
                 switch (rawVariableName)
                 {
                     case "Enable Weapon Enforcer?":
-                        _dictWeaponEnforcersLookup[enforcerId].BlnEnableWeaponEnforcer = bool.Parse(strValue);
+                        _dictWeaponEnforcersLookup[enforcerId].EnforcerState = (WeaponEnforcer.WeaponEnforcerState)Enum.Parse(typeof(WeaponEnforcer.WeaponEnforcerState), CPluginVariable.Decode(strValue));
                         break;
                     case "Set minimum required kills":
                         _dictWeaponEnforcersLookup[enforcerId].IntMinRequiredKills = int.Parse(strValue);
+                        break;
+                    case "Set maximum allowed KPM":
+                        _dictWeaponEnforcersLookup[enforcerId].FloatMaxAllowedKpm = Convert.ToSingle(strValue.Replace(",", "."), CultureInfo.InvariantCulture.NumberFormat);
+                        break;
+                    case "Set maximum allowed KDR":
+                        _dictWeaponEnforcersLookup[enforcerId].FloatMaxAllowedKdr = Convert.ToSingle(strValue.Replace(",", "."), CultureInfo.InvariantCulture.NumberFormat);
                         break;
                 }
 
@@ -302,7 +310,7 @@ namespace PRoConEvents
         
         #endregion
 
-        #region Weapon Enforcers
+        #region Weapon Enforcers Helper Methods
 
         private void SpawnNewWeaponEnforcer()
         {
@@ -347,7 +355,7 @@ namespace PRoConEvents
             _logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 8);
         }
         
-        #endregion Weapon Enforcers
+        #endregion Weapon Enforcers Helper Methods
     }
 
     #endregion class FarmingManager
@@ -358,28 +366,43 @@ namespace PRoConEvents
     {
         private readonly FarmingManager _plugin;
         private readonly string _strEnforcerId;
-
-        public bool BlnEnableWeaponEnforcer;
+        
+        public enum WeaponEnforcerState
+        {
+            Disabled,
+            Enabled,
+            Virtual
+        }
+        
+        public WeaponEnforcerState EnforcerState;
         public int IntMinRequiredKills;
-
+        public float FloatMaxAllowedKpm;
+        public float FloatMaxAllowedKdr;
+        
         public WeaponEnforcer(FarmingManager plugin, string enforcerId)
         {
             _plugin = plugin;
             _strEnforcerId = enforcerId;
 
-            BlnEnableWeaponEnforcer = false;
+            EnforcerState = WeaponEnforcerState.Disabled;
             IntMinRequiredKills = 0;
+            FloatMaxAllowedKpm = 2.0F;
+            FloatMaxAllowedKdr = 12.0F;
         }
 
         public IEnumerable<CPluginVariable> DisplayEnforcerVariables()
         {
             CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
             CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
+            CPluginVariable FloatPluginVariable(string name, float value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
             
             return new List<CPluginVariable>
             {
-                BoolPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", BlnEnableWeaponEnforcer),
-                IntPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set minimum required kills", IntMinRequiredKills)
+                //BoolPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", BlnEnableWeaponEnforcer),
+                new CPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", FarmingManagerUtilities.CreateEnumString<WeaponEnforcerState>(), EnforcerState.ToString()),
+                IntPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set minimum required kills", IntMinRequiredKills),
+                FloatPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set maximum allowed KPM", FloatMaxAllowedKpm),
+                FloatPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set maximum allowed KDR", FloatMaxAllowedKdr)
             };
         }
 
