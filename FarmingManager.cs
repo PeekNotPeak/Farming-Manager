@@ -3,14 +3,13 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Net;
-using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using PRoCon.Core;
 using PRoCon.Core.Plugin;
-
-#region namespace PRoConEvents
 
 namespace PRoConEvents
 {
@@ -22,20 +21,23 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.1.1";
+        private const string StrPluginVersion = "0.1.2";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
         /* ===== 1. Farming-Manager ===== */
         private bool _blnIsPluginEnabled;
-        
-        /* ===== 98. Plugin Update ===== */
         private bool _blnDoPluginUpdateCheck;
         private const string StrPluginUpdateUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
         
+        /* ===== 2. Weapon Enforcers ===== */
+        private Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
+        private bool _blnSpawnNewWeaponEnforcer;
+        private int _intWeaponEnforcerDeletionId;
+
         /* ===== 99. Debugging ===== */
-        public readonly Logger Logger;
-        
+        private readonly Logger _logger;
+
         #endregion Global Variables
 
         #region Constructor
@@ -45,11 +47,16 @@ namespace PRoConEvents
             /* ===== 1. FarmingManager ===== */
             _blnIsPluginEnabled = false;
             
+            /* ===== 2. Weapon Enforcers ===== */
+            _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
+            _blnSpawnNewWeaponEnforcer = false;
+            _intWeaponEnforcerDeletionId = 0;
+            
             /* ===== 98. Plugin Update ===== */
             _blnDoPluginUpdateCheck = true;
             
             /* ===== 99. Debugging ===== */
-            Logger = new Logger(this) { IntDebugLevel = 0, BoolDoDebugOutPut = false}; //Debug level is 0 by default and will not output any debug messages.
+            _logger = new Logger(this) { IntDebugLevel = 0, BoolDoDebugOutPut = false}; //Debug level is 0 by default and will not output any debug messages.
         }
         
         #endregion Constructor
@@ -85,6 +92,10 @@ namespace PRoConEvents
         {
             var events = new[]
             {
+                /* Miscellaneous */
+                "OnAccountLogin",
+                
+                /* Server Events */
                 "OnServerInfo"
             };
 
@@ -93,12 +104,12 @@ namespace PRoConEvents
 
         public void OnPluginEnable()
         {
-            Logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
+            _logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
         }
 
         public void OnPluginDisable()
         {
-            Logger.Write("Plugin successfully shut down.");
+            _logger.Write("Plugin successfully shut down.");
         }
         
         /* ==== Variable Handling ==== */
@@ -116,29 +127,38 @@ namespace PRoConEvents
         private IEnumerable<CPluginVariable> PluginVariables()
         {
             //Type safe plugin variable creation
-            Func<string, string, CPluginVariable> stringPluginVariable = (name, value) => new CPluginVariable(name, typeof(string), value);
-            Func<string, IEnumerable<string>, CPluginVariable> stringArrayPluginVariable = (name, value) => new CPluginVariable(name, typeof(string[]), value);
-            Func<string, float, CPluginVariable> floatPluginVariable = (name, value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
-            Func<string, int, CPluginVariable> intPluginVariable = (name, value) => new CPluginVariable(name, typeof(int), value);
-            Func<string, bool, CPluginVariable> boolPluginVariable = (name, value) => new CPluginVariable(name, typeof(bool), value);
-            
+            CPluginVariable StringPluginVariable(string name, string value) => new CPluginVariable(name, typeof(string), value);
+            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value);
+            CPluginVariable FloatPluginVariable(string name, float value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
+            CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
+            CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
+            CPluginVariable BoolYesNoPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(enumBoolYesNo), value ? enumBoolYesNo.Yes : enumBoolYesNo.No);
+
             /* ===== 1. Farming-Manager ===== */
-            yield return boolPluginVariable("1. Farming-Manager|Activate the plugin?", _blnIsPluginEnabled);
+            yield return BoolPluginVariable("1. Farming-Manager|Activate the plugin?", _blnIsPluginEnabled);
+            yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _blnDoPluginUpdateCheck);
+
+            /* ===== 2. Weapon Enforcers ===== */
+            yield return BoolPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnSpawnNewWeaponEnforcer);
+            yield return IntPluginVariable("2. Weapon Enforcers|Weapon Enforcer deletion ID", _intWeaponEnforcerDeletionId);
             
-            /* ===== 98. Plugin Update ===== */
-            yield return boolPluginVariable("98. Plugin Update|Check for plugin updates?", _blnDoPluginUpdateCheck);
-            
-            /* ===== 99. Debugging ===== */
-            yield return boolPluginVariable("99. Debugging|Enable debug output?", Logger.BoolDoDebugOutPut);
-            if (Logger.BoolDoDebugOutPut)
+            /* ===== 2.x Weapon Enforcers ===== */
+            foreach (var variable in _dictWeaponEnforcersLookup.Values.SelectMany(weaponEnforcer => weaponEnforcer.DisplayEnforcerVariables()))
             {
-                yield return intPluginVariable("99. Debugging|Debug level", Logger.IntDebugLevel);
+                yield return variable;
+            }
+
+            /* ===== 99. Debugging ===== */
+            yield return BoolPluginVariable("99. Debugging|Enable debug output?", _logger.BoolDoDebugOutPut);
+            if (_logger.BoolDoDebugOutPut)
+            {
+                yield return IntPluginVariable("99. Debugging|Debug level", _logger.IntDebugLevel);
             }
         }
 
         public void SetPluginVariable(string strVariable, string strValue)
         {
-            Logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'", 7);
+            _logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'".Trim(), 7);
             try
             {
                 switch (strVariable)
@@ -147,28 +167,56 @@ namespace PRoConEvents
                     case "Activate the plugin?":
                         _blnIsPluginEnabled = bool.Parse(strValue);
                         break;
-                    
-                    /* ===== 98. Plugin Update ===== */
                     case "Check for plugin updates?":
                         _blnDoPluginUpdateCheck = bool.Parse(strValue);
                         break;
                     
+                    /* ===== 2. Weapon Enforcers ===== */
+                    case "Spawn new Weapon Enforcer?":
+                        _blnSpawnNewWeaponEnforcer = bool.Parse(strValue);
+                        break;
+                    case "Weapon Enforcer deletion ID":
+                        _intWeaponEnforcerDeletionId = int.Parse(strValue);
+                        break;
+
                     /* ===== 99. Debugging ===== */
                     case "Enable debug output?":
-                        Logger.BoolDoDebugOutPut = bool.Parse(strValue);
+                        _logger.BoolDoDebugOutPut = bool.Parse(strValue);
                         break;
                     case "Debug level":
-                        Logger.IntDebugLevel = int.Parse(strValue);
+                        _logger.IntDebugLevel = int.Parse(strValue);
                         break;
                 }
+                
+                /* ===== Weapon Enforcers ===== */
+                var match = Regex.Match(strVariable, @"\#\[(.*?)\]");
+                if (!match.Success) return;
+                
+                //Extract the Enforcer ID from the variable name
+                var enforcerId = Regex.Match(strVariable, @"\d+(?=\])").Value;
+                    
+                //Remove Enforcer ID and brackets from the variable name
+                var rawVariableName = Regex.Replace(strVariable, @"\#\[(.*?)\]\s", string.Empty).Trim();
+                
+                //Set the variable in the Enforcer
+                switch (rawVariableName)
+                {
+                    case "Enable Weapon Enforcer?":
+                        _dictWeaponEnforcersLookup[enforcerId].BlnEnableWeaponEnforcer = bool.Parse(strValue);
+                        break;
+                    case "Set minimum required kills":
+                        _dictWeaponEnforcersLookup[enforcerId].IntMinRequiredKills = int.Parse(strValue);
+                        break;
+                }
+
             }
             catch (Exception e)
             {
-                Logger.Exception(e);
+                _logger.Exception(e);
             }
             finally
             {
-                //TODO: Add variable validation
+                ValidateParsedValues(strVariable, strValue);
             }
         }
 
@@ -180,7 +228,6 @@ namespace PRoConEvents
         {
             if (!_blnDoPluginUpdateCheck) return;
             CheckForPluginUpdate();
-            
         }
         
         #endregion PRoConPluginAPI
@@ -201,11 +248,9 @@ namespace PRoConEvents
                     if (data != null && data.ContainsKey("version")) latestVersion = data["version"].ToString();
                 }
 
-                Logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
-
                 if (!Regex.Match(latestVersion, GetPluginVersion()).Success)
                 {
-                    Logger.Warn($"You are currently using version {GetPluginVersion()} of {GetPluginName()}." +
+                    _logger.Warn($"You are currently using version {GetPluginVersion()} of {GetPluginName()}." +
                                 $"Consider upgrading to the newest version ({latestVersion}) via GitHub.");
                 }
             })
@@ -214,12 +259,137 @@ namespace PRoConEvents
                 Name = "PluginUpdateThread"
             };
             pluginUpdateThread.Start();
+            
+            _logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
         }
 
+        private void ValidateParsedValues(string strVariable, string strValue)
+        {
+            try
+            {
+                switch (strVariable)
+                {
+                    /* ===== 2. Weapon Enforcers ===== */
+                    case "Spawn new Weapon Enforcer?":
+                        if (_blnSpawnNewWeaponEnforcer)
+                        {
+                            SpawnNewWeaponEnforcer();
+                            _blnSpawnNewWeaponEnforcer = false;
+                        }
+                        break;
+                    
+                    case "Weapon Enforcer deletion ID":
+                        DeleteWeaponEnforcerById(int.Parse(strValue));
+                        _intWeaponEnforcerDeletionId = 0;
+                        break;
+
+                            /* ===== 99. Debugging ===== */
+                    case "Debug level":
+                        if (int.Parse(strValue) < 0 || int.Parse(strValue) > 10)
+                        {
+                            _logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
+                            _logger.IntDebugLevel = 0;
+                        }
+                        else _logger.IntDebugLevel = int.Parse(strValue);
+                        break;
+                }   
+            }
+            catch (Exception e)
+            {
+                _logger.Exception(e);
+            }
+        }
+        
         #endregion
+
+        #region Weapon Enforcers
+
+        private void SpawnNewWeaponEnforcer()
+        {
+            var id = GetNextWeaponEnforcerId();
+            _dictWeaponEnforcersLookup.Add(id, new WeaponEnforcer(this, id));
+            
+            _logger.Debug(() => $"Spawned new Weapon Enforcer with ID {id}", 8);
+        }
+
+        private List<int> GetSortedEvaluationHandlerIds()
+        {
+            var lookup = _dictWeaponEnforcersLookup.Keys.ToDictionary(int.Parse,
+                weaponEnforcerId => _dictWeaponEnforcersLookup[weaponEnforcerId]);
+
+            var sortedWeaponEnforcerIds = lookup.Keys.ToList();
+            sortedWeaponEnforcerIds.Sort((a, b) => a.CompareTo(b));
+            return sortedWeaponEnforcerIds;
+        }
+
+        private string GetNextWeaponEnforcerId()
+        {
+            if (_dictWeaponEnforcersLookup.Count == 0) return "1";
+
+            var sortedWeaponEnforcerIds = GetSortedEvaluationHandlerIds();
+
+            if (sortedWeaponEnforcerIds.Count == sortedWeaponEnforcerIds[sortedWeaponEnforcerIds.Count - 1])
+                return (sortedWeaponEnforcerIds.Count + 1).ToString();
+
+            var i = 1;
+            for (; i <= sortedWeaponEnforcerIds.Count; i++)
+                if (sortedWeaponEnforcerIds[i - 1] != i)
+                    break;
+            return i.ToString();
+        }
+
+        private void DeleteWeaponEnforcerById(int handlerId)
+        {
+            if (handlerId == 0 || !_dictWeaponEnforcersLookup.ContainsKey(handlerId.ToString())) return;
+
+            _dictWeaponEnforcersLookup.Remove(handlerId.ToString());
+            
+            _logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 8);
+        }
+        
+        #endregion Weapon Enforcers
     }
 
     #endregion class FarmingManager
+
+    #region class WeaponEnforcer
+
+    public class WeaponEnforcer
+    {
+        private readonly FarmingManager _plugin;
+        private readonly string _strEnforcerId;
+
+        public bool BlnEnableWeaponEnforcer;
+        public int IntMinRequiredKills;
+
+        public WeaponEnforcer(FarmingManager plugin, string enforcerId)
+        {
+            _plugin = plugin;
+            _strEnforcerId = enforcerId;
+
+            BlnEnableWeaponEnforcer = false;
+            IntMinRequiredKills = 0;
+        }
+
+        public IEnumerable<CPluginVariable> DisplayEnforcerVariables()
+        {
+            CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
+            CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
+            
+            return new List<CPluginVariable>
+            {
+                BoolPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", BlnEnableWeaponEnforcer),
+                IntPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set minimum required kills", IntMinRequiredKills)
+            };
+        }
+
+        private string GetFullName()
+        {
+            return $"2.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
+        }
+    }
+
+    #endregion
 
     #region class FarmingManagerUtilities
 
@@ -250,7 +420,6 @@ namespace PRoConEvents
     public class Logger
     {
         private readonly FarmingManager _plugin;
-
         public int IntDebugLevel { get; set; }
         public bool BoolDoDebugOutPut { get; set; }
 
@@ -425,6 +594,76 @@ namespace PRoConEvents
     }
 
     #endregion class Logger
-}
 
-#endregion namespace PRoConEvents
+    #region class DiscordWebhook
+
+    public class DiscordWebhook
+    {
+        private readonly Logger _logger;
+        private readonly string _url;
+        private readonly string _username;
+        private readonly string _avatar;
+        private readonly int _color;
+
+        public DiscordWebhook(Logger logger, string url, string username, string avatar, int color)
+        {
+            _logger = logger;
+            _url = url;
+            _username = username;
+            _avatar = avatar;
+            _color = color;
+        }
+
+        public void SendNotification(string title, string content)
+        {
+            if (content == null)
+            {
+                _logger.Error("[DiscordWebhook] Webhook content cannot be empty. Please provide an input.");
+                return;
+            }
+
+            var embed = new Hashtable
+            {
+                { "title", title },
+                { "description", content },
+                { "color", _color },
+                { "timestamp", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }
+            };
+
+            var embeds = new ArrayList { embed };
+
+            var payload = new Hashtable
+            {
+                { "username", _username },
+                { "avatar_url", _avatar },
+                { "embeds", embeds }
+            };
+
+            var body = JSON.JsonEncode(payload);
+            DoRequest(body);
+        }
+
+        private void DoRequest(string body)
+        {
+            try
+            {
+                var request = WebRequest.Create(_url);
+                request.Method = "POST";
+                request.ContentType = "application/json";
+                var byteArray = Encoding.UTF8.GetBytes(body);
+                request.ContentLength = byteArray.Length;
+
+                using (var dataStream = request.GetRequestStream())
+                {
+                    dataStream.Write(byteArray, 0, byteArray.Length);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.Exception(e);
+            }
+        }
+    }
+
+    #endregion class DiscordWebhook
+}
