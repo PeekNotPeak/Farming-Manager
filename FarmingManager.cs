@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
@@ -34,9 +35,10 @@ namespace PRoConEvents
         private Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
         private bool _blnSpawnNewWeaponEnforcer;
         private int _intWeaponEnforcerDeletionId;
+        private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
 
         /* ===== 99. Debugging ===== */
-        private readonly Logger _logger;
+        public readonly Logger Logger;
 
         #endregion Global Variables
 
@@ -56,7 +58,7 @@ namespace PRoConEvents
             _blnDoPluginUpdateCheck = true;
             
             /* ===== 99. Debugging ===== */
-            _logger = new Logger(this) { IntDebugLevel = 0, BoolDoDebugOutPut = false}; //Debug level is 0 by default and will not output any debug messages.
+            Logger = new Logger(this) { IntDebugLevel = 0, BoolDoDebugOutPut = false}; //Debug level is 0 by default and will not output any debug messages.
         }
         
         #endregion Constructor
@@ -96,20 +98,25 @@ namespace PRoConEvents
                 "OnAccountLogin",
                 
                 /* Server Events */
-                "OnServerInfo"
+                "OnServerInfo",
+                
+                /* Player Events */
+                "OnPlayerKilled",
             };
 
             RegisterEvents(GetType().Name, events);
+            
+            LoadSavedWeaponEnforcers();
         }
 
         public void OnPluginEnable()
         {
-            _logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
+            Logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
         }
 
         public void OnPluginDisable()
         {
-            _logger.Write("Plugin successfully shut down.");
+            Logger.Write("Plugin successfully shut down.");
         }
         
         /* ==== Variable Handling ==== */
@@ -139,7 +146,7 @@ namespace PRoConEvents
             yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _blnDoPluginUpdateCheck);
 
             /* ===== 2. Weapon Enforcers ===== */
-            yield return BoolPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnSpawnNewWeaponEnforcer);
+            yield return BoolYesNoPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnSpawnNewWeaponEnforcer);
             yield return IntPluginVariable("2. Weapon Enforcers|Weapon Enforcer deletion ID", _intWeaponEnforcerDeletionId);
             
             /* ===== 2.x Weapon Enforcers ===== */
@@ -149,10 +156,10 @@ namespace PRoConEvents
             }
 
             /* ===== 99. Debugging ===== */
-            yield return BoolPluginVariable("99. Debugging|Enable debug output?", _logger.BoolDoDebugOutPut);
-            if (_logger.BoolDoDebugOutPut)
+            yield return BoolPluginVariable("99. Debugging|Enable debug output?", Logger.BoolDoDebugOutPut);
+            if (Logger.BoolDoDebugOutPut)
             {
-                yield return IntPluginVariable("99. Debugging|Debug level", _logger.IntDebugLevel);
+                yield return IntPluginVariable("99. Debugging|Debug level", Logger.IntDebugLevel);
             }
         }
 
@@ -160,7 +167,7 @@ namespace PRoConEvents
         {
             if (strVariable.Contains('|')) strVariable = strVariable.Substring(strVariable.IndexOf('|') + 1);
             
-            _logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'".Trim(), 7);
+            Logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'".Trim(), 7);
             try
             {
                 switch (strVariable)
@@ -169,28 +176,32 @@ namespace PRoConEvents
                     case "Activate the plugin?":
                         _blnIsPluginEnabled = bool.Parse(strValue);
                         break;
+                    
                     case "Check for plugin updates?":
                         _blnDoPluginUpdateCheck = bool.Parse(strValue);
                         break;
                     
                     /* ===== 2. Weapon Enforcers ===== */
                     case "Spawn new Weapon Enforcer?":
-                        _blnSpawnNewWeaponEnforcer = bool.Parse(strValue);
+                        _blnSpawnNewWeaponEnforcer = strValue == "Yes";
                         break;
+                    
                     case "Weapon Enforcer deletion ID":
                         _intWeaponEnforcerDeletionId = int.Parse(strValue);
                         break;
 
                     /* ===== 99. Debugging ===== */
                     case "Enable debug output?":
-                        _logger.BoolDoDebugOutPut = bool.Parse(strValue);
+                        Logger.BoolDoDebugOutPut = bool.Parse(strValue);
                         break;
+                    
                     case "Debug level":
-                        _logger.IntDebugLevel = int.Parse(strValue);
+                        Logger.IntDebugLevel = int.Parse(strValue);
                         break;
                 }
                 
-                /* ===== Weapon Enforcers ===== */
+                /* ===== Weapon Enforcers ===== */ 
+                
                 var match = Regex.Match(strVariable, @"\#\[(.*?)\]");
                 if (!match.Success) return;
                 
@@ -206,21 +217,39 @@ namespace PRoConEvents
                     case "Enable Weapon Enforcer?":
                         _dictWeaponEnforcersLookup[enforcerId].EnforcerState = (WeaponEnforcer.WeaponEnforcerState)Enum.Parse(typeof(WeaponEnforcer.WeaponEnforcerState), CPluginVariable.Decode(strValue));
                         break;
+                    
+                    case "Enforce single instance weapon?":
+                        _dictWeaponEnforcersLookup[enforcerId].BoolEnforceSingleInstanceWeapon = strValue == "Yes";
+                        break;
+                    
+                    case "Select monitored vehicle":
+                        _dictWeaponEnforcersLookup[enforcerId].StrCurrentlyMonitoredWeapons = CPluginVariable.DecodeStringArray(strValue);
+                        break;
+                    
                     case "Set minimum required kills":
                         _dictWeaponEnforcersLookup[enforcerId].IntMinRequiredKills = int.Parse(strValue);
                         break;
+                    
+                    case "Allow higher required kills for reserved slot players?":
+                        _dictWeaponEnforcersLookup[enforcerId].BoolAllowHigherTotalKillsForReservedSlotPlayers = strValue == "Yes";
+                        break;
+                    
+                    case "Set minimum required kills for reserved slot players":
+                        _dictWeaponEnforcersLookup[enforcerId].IntMinRequiredKillsForReservedSlotPlayers = int.Parse(strValue);
+                        break;
+                    
                     case "Set maximum allowed KPM":
                         _dictWeaponEnforcersLookup[enforcerId].FloatMaxAllowedKpm = Convert.ToSingle(strValue.Replace(",", "."), CultureInfo.InvariantCulture.NumberFormat);
                         break;
+                    
                     case "Set maximum allowed KDR":
                         _dictWeaponEnforcersLookup[enforcerId].FloatMaxAllowedKdr = Convert.ToSingle(strValue.Replace(",", "."), CultureInfo.InvariantCulture.NumberFormat);
                         break;
                 }
-
             }
             catch (Exception e)
             {
-                _logger.Exception(e);
+                Logger.Exception(e);
             }
             finally
             {
@@ -237,7 +266,35 @@ namespace PRoConEvents
             if (!_blnDoPluginUpdateCheck) return;
             CheckForPluginUpdate();
         }
-        
+
+        public override void OnServerInfo(CServerInfo csiServerInfo)
+        {
+            if (_blnIsPluginEnabled) SaveCurrentWeaponEnforcers();
+        }
+
+        public override void OnPlayerKilled(Kill kKillerVictimDetails)
+        {
+            if (!_blnIsPluginEnabled) return;
+
+            // We don't want to count area or explosion damage
+            if (kKillerVictimDetails.DamageType == "DamageArea" || kKillerVictimDetails.DamageType == "DamageExplosion") return;
+            
+            // Find the first WeaponEnforcer that monitors the weapon used by the killer and is enabled
+            var weaponEnforcer = _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(kKillerVictimDetails.DamageType) && we.EnforcerState == WeaponEnforcer.WeaponEnforcerState.Enabled);
+            
+            //Run all Enforcer logic in a separate thread
+            var weaponEnforcerThread = new Thread(() =>
+            {
+                weaponEnforcer.RunEnforcementLogic(kKillerVictimDetails);
+            })
+            {
+                IsBackground = true,
+                Name = "WeaponEnforcerThread - WE#" + weaponEnforcer.StrEnforcerId
+            };
+            weaponEnforcerThread.Start();
+            
+        }
+
         #endregion PRoConPluginAPI
 
         #region Helper Methods
@@ -258,7 +315,7 @@ namespace PRoConEvents
 
                 if (!Regex.Match(latestVersion, GetPluginVersion()).Success)
                 {
-                    _logger.Warn($"You are currently using version {GetPluginVersion()} of {GetPluginName()}." +
+                    Logger.Warn($"You are currently using version {GetPluginVersion()} of {GetPluginName()}. " +
                                 $"Consider upgrading to the newest version ({latestVersion}) via GitHub.");
                 }
             })
@@ -268,7 +325,7 @@ namespace PRoConEvents
             };
             pluginUpdateThread.Start();
             
-            _logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
+            Logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
         }
 
         private void ValidateParsedValues(string strVariable, string strValue)
@@ -281,7 +338,7 @@ namespace PRoConEvents
                     case "Spawn new Weapon Enforcer?":
                         if (_blnSpawnNewWeaponEnforcer)
                         {
-                            SpawnNewWeaponEnforcer();
+                            CreateNewWeaponEnforcer();
                             _blnSpawnNewWeaponEnforcer = false;
                         }
                         break;
@@ -295,38 +352,39 @@ namespace PRoConEvents
                     case "Debug level":
                         if (int.Parse(strValue) < 0 || int.Parse(strValue) > 10)
                         {
-                            _logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
-                            _logger.IntDebugLevel = 0;
+                            Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
+                            Logger.IntDebugLevel = 0;
                         }
-                        else _logger.IntDebugLevel = int.Parse(strValue);
+                        else Logger.IntDebugLevel = int.Parse(strValue);
                         break;
                 }   
             }
             catch (Exception e)
             {
-                _logger.Exception(e);
+                Logger.Exception(e);
             }
         }
-        
+
         #endregion
 
         #region Weapon Enforcers Helper Methods
 
-        private void SpawnNewWeaponEnforcer()
+        private void CreateNewWeaponEnforcer()
         {
             var id = GetNextWeaponEnforcerId();
             _dictWeaponEnforcersLookup.Add(id, new WeaponEnforcer(this, id));
             
-            _logger.Debug(() => $"Spawned new Weapon Enforcer with ID {id}", 8);
+            Logger.Debug(() => $"Created new Weapon Enforcer with ID {id}", 8);
         }
 
-        private List<int> GetSortedEvaluationHandlerIds()
+        private List<int> GetSortedWeaponEnforcerIds()
         {
             var lookup = _dictWeaponEnforcersLookup.Keys.ToDictionary(int.Parse,
                 weaponEnforcerId => _dictWeaponEnforcersLookup[weaponEnforcerId]);
 
             var sortedWeaponEnforcerIds = lookup.Keys.ToList();
             sortedWeaponEnforcerIds.Sort((a, b) => a.CompareTo(b));
+            
             return sortedWeaponEnforcerIds;
         }
 
@@ -334,7 +392,7 @@ namespace PRoConEvents
         {
             if (_dictWeaponEnforcersLookup.Count == 0) return "1";
 
-            var sortedWeaponEnforcerIds = GetSortedEvaluationHandlerIds();
+            var sortedWeaponEnforcerIds = GetSortedWeaponEnforcerIds();
 
             if (sortedWeaponEnforcerIds.Count == sortedWeaponEnforcerIds[sortedWeaponEnforcerIds.Count - 1])
                 return (sortedWeaponEnforcerIds.Count + 1).ToString();
@@ -343,6 +401,7 @@ namespace PRoConEvents
             for (; i <= sortedWeaponEnforcerIds.Count; i++)
                 if (sortedWeaponEnforcerIds[i - 1] != i)
                     break;
+            
             return i.ToString();
         }
 
@@ -352,20 +411,34 @@ namespace PRoConEvents
 
             _dictWeaponEnforcersLookup.Remove(handlerId.ToString());
             
-            _logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 8);
+            Logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 8);
         }
         
+        private void SaveCurrentWeaponEnforcers()
+        {
+            if (_dictWeaponEnforcersLookup.Count >= 0) return;
+
+            //TODO: Add saving of current weapon enforcers
+        }
+        
+        private void LoadSavedWeaponEnforcers()
+        {
+            if (!File.Exists(StrWeaponEnforcersSavePath)) return;
+            
+            //TODO: Add loading of saved weapon enforcers
+        }
+
         #endregion Weapon Enforcers Helper Methods
     }
 
     #endregion class FarmingManager
 
     #region class WeaponEnforcer
-
+    
     public class WeaponEnforcer
     {
         private readonly FarmingManager _plugin;
-        private readonly string _strEnforcerId;
+        public readonly string StrEnforcerId;
         
         public enum WeaponEnforcerState
         {
@@ -375,14 +448,19 @@ namespace PRoConEvents
         }
         
         public WeaponEnforcerState EnforcerState;
+        public bool BoolEnforceSingleInstanceWeapon;
+        public string[] StrCurrentlyMonitoredWeapons = { "Gameplay/Vehicles/AH1Z/AH1Z", "Gameplay/Vehicles/AH6/AH6_Littlebird", "Gameplay/Vehicles/F35/F35B", "Gameplay/Vehicles/CH_MBT_Type99/CH_MBT_Type99" };
         public int IntMinRequiredKills;
+        public bool BoolAllowHigherTotalKillsForReservedSlotPlayers;
+        public int IntMinRequiredKillsForReservedSlotPlayers;
+        
         public float FloatMaxAllowedKpm;
         public float FloatMaxAllowedKdr;
         
         public WeaponEnforcer(FarmingManager plugin, string enforcerId)
         {
             _plugin = plugin;
-            _strEnforcerId = enforcerId;
+            StrEnforcerId = enforcerId;
 
             EnforcerState = WeaponEnforcerState.Disabled;
             IntMinRequiredKills = 0;
@@ -392,24 +470,41 @@ namespace PRoConEvents
 
         public IEnumerable<CPluginVariable> DisplayEnforcerVariables()
         {
-            CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
-            CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
+            //Type safe plugin variable creation
+            CPluginVariable StringPluginVariable(string name, string value) => new CPluginVariable(name, typeof(string), value);
+            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value);
             CPluginVariable FloatPluginVariable(string name, float value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
-            
-            return new List<CPluginVariable>
+            CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
+            CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
+            CPluginVariable BoolYesNoPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(enumBoolYesNo), value ? enumBoolYesNo.Yes : enumBoolYesNo.No);
+
+            var enforcerVariables = new List<CPluginVariable>
             {
-                //BoolPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", BlnEnableWeaponEnforcer),
-                new CPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Enable Weapon Enforcer?", FarmingManagerUtilities.CreateEnumString<WeaponEnforcerState>(), EnforcerState.ToString()),
-                IntPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set minimum required kills", IntMinRequiredKills),
-                FloatPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set maximum allowed KPM", FloatMaxAllowedKpm),
-                FloatPluginVariable(GetFullName() + $"| #[2.{_strEnforcerId}] Set maximum allowed KDR", FloatMaxAllowedKdr)
+                new CPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Enable Weapon Enforcer?", FarmingManagerUtilities.CreateEnumString<WeaponEnforcerState>(), EnforcerState.ToString()),
+                BoolYesNoPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Enforce single instance weapon?", BoolEnforceSingleInstanceWeapon),
+                StringArrayPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Select monitored weapon", StrCurrentlyMonitoredWeapons),
+                IntPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Set minimum required kills", IntMinRequiredKills),
+                BoolYesNoPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Allow higher required kills for reserved slot players?", BoolAllowHigherTotalKillsForReservedSlotPlayers)
             };
+            if (BoolAllowHigherTotalKillsForReservedSlotPlayers)
+                enforcerVariables.Add(IntPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Set minimum required kills for reserved slot players", IntMinRequiredKillsForReservedSlotPlayers));
+            
+            enforcerVariables.Add(FloatPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Set maximum allowed KPM", FloatMaxAllowedKpm));
+            enforcerVariables.Add(FloatPluginVariable(GetFullName() + $"|#[2.{StrEnforcerId}] Set maximum allowed KDR", FloatMaxAllowedKdr));
+
+            return enforcerVariables;
+        }
+
+        public void RunEnforcementLogic(Kill kKillerVictimDetails)
+        {
+            _plugin.Logger.Debug(() => "Initializing enforcement logic for " + GetFullName(), 10);
         }
 
         private string GetFullName()
         {
-            return $"2.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
+            return $"2.{StrEnforcerId} Weapon Enforcer with ID #{StrEnforcerId}";
         }
+
     }
 
     #endregion
