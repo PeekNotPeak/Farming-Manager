@@ -7,11 +7,11 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using PRoCon.Core;
+using PRoCon.Core.Players;
 using PRoCon.Core.Plugin;
 
 namespace PRoConEvents
@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.2.0";
+        private const string StrPluginVersion = "0.2.1";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
@@ -32,12 +32,14 @@ namespace PRoConEvents
         private bool _blnIsPluginEnabled;
         private bool _blnDoPluginUpdateCheck;
         private const string StrPluginUpdateUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
-        
+        public List<string> LstCurrentReservedSlotPlayers;
+
         /* ===== 2. Weapon Enforcers ===== */
         private readonly Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
         private bool _blnCreateNewWeaponEnforcer;
         private int _intWeaponEnforcerDeletionId;
         private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
+        public bool BoolAllowFirstEnforcementMessage;
 
         private Hashtable _hshTblHumanWeaponNames;
         private const string StrHumanWeaponNamesUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/weapon_names.json";
@@ -53,11 +55,13 @@ namespace PRoConEvents
         {
             /* ===== 1. FarmingManager ===== */
             _blnIsPluginEnabled = false;
+            LstCurrentReservedSlotPlayers = new List<string>();
             
             /* ===== 2. Weapon Enforcers ===== */
             _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
             _blnCreateNewWeaponEnforcer = false;
             _intWeaponEnforcerDeletionId = 0;
+            BoolAllowFirstEnforcementMessage = true;
             
             /* ===== 98. Plugin Update ===== */
             _blnDoPluginUpdateCheck = true;
@@ -107,8 +111,13 @@ namespace PRoConEvents
                 /* Server Events */
                 "OnServerInfo",
                 
+                /* Reserved Slots Events */
+                "OnReservedSlotsList",
+                
                 /* Player Events */
                 "OnPlayerKilled",
+                "OnPlayerLeft",
+                "OnPlayerDisconnected",
             };
 
             RegisterEvents(GetType().Name, events);
@@ -166,6 +175,7 @@ namespace PRoConEvents
             /* ===== 2. Weapon Enforcers ===== */
             yield return BoolYesNoPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnCreateNewWeaponEnforcer);
             yield return IntPluginVariable("2. Weapon Enforcers|Weapon Enforcer deletion ID", _intWeaponEnforcerDeletionId);
+            yield return BoolYesNoPluginVariable("2. Weapon Enforcers|Allow first enforcement message?", BoolAllowFirstEnforcementMessage);
             
             /* ===== 2.x Weapon Enforcers ===== */
             foreach (var variable in _dictWeaponEnforcersLookup.Values.SelectMany(weaponEnforcer => weaponEnforcer.DisplayEnforcerVariables()))
@@ -205,6 +215,10 @@ namespace PRoConEvents
                     
                     case "Weapon Enforcer deletion ID":
                         _intWeaponEnforcerDeletionId = int.Parse(strValue);
+                        break;
+                    
+                    case "Allow first enforcement message?":
+                        BoolAllowFirstEnforcementMessage = strValue == "Yes";
                         break;
 
                     /* ===== 99. Debugging ===== */
@@ -301,6 +315,16 @@ namespace PRoConEvents
             Logger.Debug(() => "Exiting OnServerInfo Event", 7);
         }
 
+        public override void OnReservedSlotsList(List<string> soldierNames)
+        {
+            Logger.Debug(() => "Received OnReservedSlotsList Event", 7);
+            
+            if (!_blnIsPluginEnabled) return;
+            LstCurrentReservedSlotPlayers = soldierNames;
+            
+            Logger.Debug(() => "Exiting OnReservedSlotsList Event", 7);
+        }
+
         public override void OnPlayerKilled(Kill kKillerVictimDetails)
         {
             Logger.Debug(() => "Received OnPlayerKilled Event", 7);
@@ -321,7 +345,7 @@ namespace PRoConEvents
             //Humanize the weapon name
             var weaponName = GetDecodedWeaponName(kKillerVictimDetails.DamageType);
             
-            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{weaponName}'", 5);
+            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{weaponName}'", 4);
 
             // Find the first WeaponEnforcer that monitors the weapon used by the killer
             var weaponEnforcer = _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(weaponName));
@@ -329,7 +353,7 @@ namespace PRoConEvents
             //Run all Enforcer logic in a separate thread
             var weaponEnforcerThread = new Thread(() =>
             {
-                weaponEnforcer.RunEnforcementLogic(kKillerVictimDetails);
+                weaponEnforcer.RunEnforcement(kKillerVictimDetails);
             })
             {
                 IsBackground = true,
@@ -339,6 +363,51 @@ namespace PRoConEvents
             ThreadPool.QueueUserWorkItem(_ => weaponEnforcerThread.Start());
 
             Logger.Debug(() => "Exiting OnPlayerKilled Event", 7);
+        }
+
+        public override void OnPlayerLeft(CPlayerInfo playerInfo)
+        {
+            Logger.Debug(() => "Received OnPlayerLeft Event", 7);
+            
+            if (!_blnIsPluginEnabled) return;
+            
+            //Remove the player from the list of tracked players
+            foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values)
+            {
+                weaponEnforcer.RemoveTrackedPlayer(playerInfo.SoldierName);
+            }
+            
+            Logger.Debug(() => "Exiting OnPlayerLeft Event", 7);
+        }
+
+        public override void OnPlayerDisconnected(string soldierName, string reason)
+        {
+            Logger.Debug(() => "Received OnPlayerDisconnected Event", 7);
+            
+            if (!_blnIsPluginEnabled) return;
+            
+            //Remove the player from the list of tracked players
+            foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values)
+            {
+                weaponEnforcer.RemoveTrackedPlayer(soldierName);
+            }
+            
+            Logger.Debug(() => "Exiting OnPlayerDisconnected Event", 7);
+        }
+
+        public override void OnRoundOver(int winningTeamId)
+        {
+            Logger.Debug(() => "Received OnRoundOver Event", 7);
+            
+            if (!_blnIsPluginEnabled) return;
+            
+            //Reset all tracked players
+            foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values)
+            {
+                weaponEnforcer.ResetTrackedPlayers();
+            }
+            
+            Logger.Debug(() => "Exiting OnRoundOver Event", 7);
         }
 
         #endregion PRoConPluginAPI
@@ -441,12 +510,13 @@ namespace PRoConEvents
             return humanizedWeaponNames;
         }
 
-        public string GetDecodedWeaponName(string engineWeaponName)
+        public string GetDecodedWeaponName(string engineWeaponName, bool longName = true)
         {
             var readableWeaponNames = (Hashtable)_hshTblHumanWeaponNames[engineWeaponName];
             var playerWeapon = string.Empty;
+            var weaponKey = longName ? "readable_long" : "readable_short"; 
             
-            foreach (var weaponName in readableWeaponNames.Cast<DictionaryEntry>().Where(weaponName => weaponName.Key.ToString() == "readable_long"))
+            foreach (var weaponName in readableWeaponNames.Cast<DictionaryEntry>().Where(weaponName => weaponName.Key.ToString() == weaponKey))
             {
                 playerWeapon = weaponName.Value.ToString();
             }
@@ -483,6 +553,34 @@ namespace PRoConEvents
             
             domain = string.Join(".", tokens, tokens.Length - validTokens, validTokens);
             return domain;
+        }
+
+        public void SendGlobalMessage(string message)
+        { }
+        
+        public void SendGlobalYell(string message, int duration)
+        { }
+        
+        public void SendTeamMessage(string message, int teamId)
+        { }
+        
+        public void SendTeamYell(string message, int duration, int teamId)
+        { }
+        
+        public void SendSquadMessage(string message, int teamId, int squadId)
+        { }
+        
+        public void SendSquadYell(string message, int duration, int teamId, int squadId)
+        { }
+
+        public void SendPlayerMessage(string soldierName, string message)
+        {
+            ExecuteCommand("procon.protected.send", "admin.say", message, "player", soldierName);
+        }
+
+        public void SendPlayerYell(string soldierName, string message, int duration, bool doLogging = true)
+        {
+            ExecuteCommand("procon.protected.send", "admin.yell", message, duration.ToString(), "player", soldierName);
         }
 
         #endregion
@@ -533,7 +631,10 @@ namespace PRoConEvents
             Logger.Debug(() => "Starting up DeleteWeaponEnforcerById", 7);
             
             if (handlerId == 0 || !_dictWeaponEnforcersLookup.ContainsKey(handlerId.ToString())) return;
+
+            _dictWeaponEnforcersLookup[handlerId.ToString()] = null;
             _dictWeaponEnforcersLookup.Remove(handlerId.ToString());
+            GC.Collect();
             Logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 2);
             
             Logger.Debug(() => "Exiting DeleteWeaponEnforcerById", 7);
@@ -588,7 +689,7 @@ namespace PRoConEvents
         public float FloatMaxAllowedKpm;
         public float FloatMaxAllowedKdr;
 
-        private readonly Dictionary<string, List<Dictionary<string, int>>> _dictTrackedPlayers;
+        public readonly Dictionary<string, List<Dictionary<string, int>>> DictTrackedPlayers;
 
         public WeaponEnforcer(FarmingManager plugin, string enforcerId)
         {
@@ -596,16 +697,16 @@ namespace PRoConEvents
             _strEnforcerId = enforcerId;
 
             EnforcerState = WeaponEnforcerState.Disabled;
-            BoolEnforceSingleInstanceWeapon = true;
+            BoolEnforceSingleInstanceWeapon = false;
             StrCurrentlyMonitoredWeapons = new[] { "AH-1Z Viper", "Type 99 MBT", "M1 Abrams MBT", "LAV-25 APC" };
             BoolPersistTrackedPlayersThroughRounds = true;
             IntMinRequiredKills = 0;
-            BoolAllowHigherTotalKillsForReservedSlotPlayers = true;
+            BoolAllowHigherTotalKillsForReservedSlotPlayers = false;
             IntMinRequiredKillsForReservedSlotPlayers = 0;
             FloatMaxAllowedKpm = 2.0F;
             FloatMaxAllowedKdr = 12.0F;
             
-            _dictTrackedPlayers = new Dictionary<string, List<Dictionary<string, int>>>();
+            DictTrackedPlayers = new Dictionary<string, List<Dictionary<string, int>>>();
         }
 
         public IEnumerable<CPluginVariable> DisplayEnforcerVariables()
@@ -636,50 +737,70 @@ namespace PRoConEvents
             return enforcerVariables;
         }
 
-        public void RunEnforcementLogic(Kill kKillerVictimDetails)
+        public void RunEnforcement(Kill kKillerVictimDetails)
         {
             //If the enforcer is disabled, we want to immediately return
             //However we allow virtual mode and obviously enabled mode
             if (EnforcerState == WeaponEnforcerState.Disabled) return;
             
-            //Track the player's weapon and how often they've used it
-            var killerSoldierName = kKillerVictimDetails.Killer.SoldierName;
+            var soldierName = kKillerVictimDetails.Killer.SoldierName;
             var playerWeapon = _plugin.GetDecodedWeaponName(kKillerVictimDetails.DamageType);
 
-            _plugin.Logger.Debug(() => $"Currently tracking player '{killerSoldierName}' with '{playerWeapon}' on Enforcer #{_strEnforcerId}", 8);
+            _plugin.Logger.Debug(() => $"Currently tracking player '{soldierName}' with '{playerWeapon}' on Enforcer #{_strEnforcerId}", 8);
 
             //Soldier hasn't been tracked yet so every weapon is new
-            if (!_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName))
+            if (!DictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName))
             {
-                AddFirstTrackingEntry(killerSoldierName, playerWeapon);
+                AddFirstTrackingEntry(soldierName, playerWeapon);
             }
 
             //Soldier has been tracked but the weapon they're using hasn't been tracked yet
-            else if (!_dictTrackedPlayers[killerSoldierName].Any(x => x.ContainsKey(playerWeapon)))
+            else if (!DictTrackedPlayers[soldierName].Any(x => x.ContainsKey(playerWeapon)))
             {
-                AddTrackedWeaponToSoldier(killerSoldierName, playerWeapon);
+                AddTrackedWeaponToSoldier(soldierName, playerWeapon);
             }
 
             //Soldier has been tracked and the weapon they're using has been tracked
             //So we just need to increment the weapon's usage count
             else
             {
-                IncrementCountOnTrackedWeapon(killerSoldierName, playerWeapon);
+                IncrementCountOnTrackedWeapon(soldierName, playerWeapon);
             }
+            
+            //Lastly go through the tracked player and check if they exceeded some limit
+            CheckTrackedPlayer(kKillerVictimDetails.Killer);
         }
+
+        private void CheckTrackedPlayer(CPlayerInfo player)
+        {
+            //TODO: Add actual enforcement
+        }
+        
         
         private void AddFirstTrackingEntry(string soldierName, string playerWeapon)
         {
             _plugin.Logger.Debug(() => "Starting up AddFirstTrackingEntry", 7);
             
-            _dictTrackedPlayers.Add(soldierName, new List<Dictionary<string, int>>()
+            DictTrackedPlayers.Add(soldierName, new List<Dictionary<string, int>>()
             {
                 new Dictionary<string, int>()
                 {
                     { playerWeapon, 1 }
                 }
             });
+
+            if (_plugin.BoolAllowFirstEnforcementMessage) 
+                if (EnforcerState == WeaponEnforcerState.Virtual)
+                    _plugin.Logger.Debug(() => "Virtual mode is enabled, so no enforcement message will be sent", 3);
+                else
+                {
+                    _plugin.SendPlayerYell(soldierName, $"You are now being tracked by weapon enforcer #{_strEnforcerId} for weapon {playerWeapon}",10);
+                    _plugin.SendPlayerMessage(soldierName, $"You are now being tracked by weapon enforcer #{_strEnforcerId} for weapon {playerWeapon}");
+                }
+
             _plugin.Logger.Debug(() => $"Added new player '{soldierName}' to tracked players", 3);
+            
+            
             
             _plugin.Logger.Debug(() => "Exiting AddFirstTrackingEntry", 7);
         }
@@ -688,7 +809,7 @@ namespace PRoConEvents
         {
             _plugin.Logger.Debug(() => "Starting up AddTrackedWeaponToSoldier", 7);
             
-            _dictTrackedPlayers[soldierName].Add(new Dictionary<string, int>()
+            DictTrackedPlayers[soldierName].Add(new Dictionary<string, int>()
             {
                 { playerWeapon, 1 }
             });
@@ -702,11 +823,37 @@ namespace PRoConEvents
         {
             _plugin.Logger.Debug(() => "Starting up IncrementCountOnTrackedWeapon", 7);
             
-            _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
-            var weaponUsageCount = _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
+            DictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
+            var weaponUsageCount = DictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
             _plugin.Logger.Debug(() => $"Incremented count for player {soldierName} with {playerWeapon} to {weaponUsageCount}", 3);
             
             _plugin.Logger.Debug(() => "Exiting IncrementCountOnTrackedWeapon", 7);
+        }
+        
+        public void RemoveTrackedPlayer(string soldierName)
+        {
+            _plugin.Logger.Debug(() => "Starting up RemoveTrackedPlayer", 7);
+
+            if (DictTrackedPlayers.ContainsKey(soldierName))
+            {
+                DictTrackedPlayers.Remove(soldierName);
+                _plugin.Logger.Debug(() => $"Removed player '{soldierName}' from tracked players", 3);
+            }
+
+            _plugin.Logger.Debug(() => "Exiting RemoveTrackedPlayer", 7);
+        }
+        
+        public void ResetTrackedPlayers()
+        {
+            _plugin.Logger.Debug(() => "Starting up ResetTrackedPlayer", 7);
+
+            if (!BoolPersistTrackedPlayersThroughRounds)
+            {
+                DictTrackedPlayers.Clear();
+                _plugin.Logger.Debug(() => "Reset all tracked players", 3);
+            }
+
+            _plugin.Logger.Debug(() => "Exiting ResetTrackedPlayer", 7);
         }
 
         private string GetFullName()
@@ -742,29 +889,7 @@ namespace PRoConEvents
             if (data == null) data = Array.Empty<string>();
             return prepare ? data.Select(CPluginVariable.Encode).ToArray() : (data as string[]) ?? data.ToArray();
         }
-
-        public static string HumanizeWeaponName(string engineName)
-        {
-            string humanized;
-            
-            switch (engineName)
-            {
-                case "Gameplay/Vehicles/AH1Z/AH1Z":
-                    humanized = "AH1Z";
-                    break; 
-                
-                case "Gameplay/Vehicles/AH6/AH6_Littlebird":
-                    humanized = "AH6J";
-                    break;
-                
-                default:
-                    humanized = "Unknown";
-                    break;
-            }
-
-            return humanized;
-        }
-
+        
         public static string GetPluginDescription()
         {
             return @"This plugin is designed to help you manage farming players on your server.
