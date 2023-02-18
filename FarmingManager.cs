@@ -4,12 +4,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Xml;
 using PRoCon.Core;
 using PRoCon.Core.Plugin;
 
@@ -23,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.1.6";
+        private const string StrPluginVersion = "0.2.0";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
@@ -33,12 +34,12 @@ namespace PRoConEvents
         private const string StrPluginUpdateUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
         
         /* ===== 2. Weapon Enforcers ===== */
-        private Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
-        private bool _blnSpawnNewWeaponEnforcer;
+        private readonly Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
+        private bool _blnCreateNewWeaponEnforcer;
         private int _intWeaponEnforcerDeletionId;
         private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
 
-        private Hashtable _hshtblHumanWeaponNames;
+        private Hashtable _hshTblHumanWeaponNames;
         private const string StrHumanWeaponNamesUrl = "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/weapon_names.json";
 
         /* ===== 99. Debugging ===== */
@@ -55,7 +56,7 @@ namespace PRoConEvents
             
             /* ===== 2. Weapon Enforcers ===== */
             _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
-            _blnSpawnNewWeaponEnforcer = false;
+            _blnCreateNewWeaponEnforcer = false;
             _intWeaponEnforcerDeletionId = 0;
             
             /* ===== 98. Plugin Update ===== */
@@ -122,7 +123,7 @@ namespace PRoConEvents
             Logger.Debug(() => "Received OnPluginEnable Event", 7);
             
             Logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
-            _hshtblHumanWeaponNames = FetchHumanizedWeaponNames();
+            _hshTblHumanWeaponNames = FetchHumanizedWeaponNames();
             
             Logger.Debug(() => "Exiting OnPluginEnable Event", 7);
         }
@@ -152,7 +153,7 @@ namespace PRoConEvents
         {
             //Type safe plugin variable creation
             CPluginVariable StringPluginVariable(string name, string value) => new CPluginVariable(name, typeof(string), value);
-            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value.PrepareSafely(true));
+            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value);
             CPluginVariable FloatPluginVariable(string name, float value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
             CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
             CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
@@ -163,7 +164,7 @@ namespace PRoConEvents
             yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _blnDoPluginUpdateCheck);
 
             /* ===== 2. Weapon Enforcers ===== */
-            yield return BoolYesNoPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnSpawnNewWeaponEnforcer);
+            yield return BoolYesNoPluginVariable("2. Weapon Enforcers|Spawn new Weapon Enforcer?", _blnCreateNewWeaponEnforcer);
             yield return IntPluginVariable("2. Weapon Enforcers|Weapon Enforcer deletion ID", _intWeaponEnforcerDeletionId);
             
             /* ===== 2.x Weapon Enforcers ===== */
@@ -199,7 +200,7 @@ namespace PRoConEvents
                     
                     /* ===== 2. Weapon Enforcers ===== */
                     case "Spawn new Weapon Enforcer?":
-                        _blnSpawnNewWeaponEnforcer = strValue == "Yes";
+                        _blnCreateNewWeaponEnforcer = strValue == "Yes";
                         break;
                     
                     case "Weapon Enforcer deletion ID":
@@ -242,7 +243,7 @@ namespace PRoConEvents
                         _dictWeaponEnforcersLookup[enforcerId].BoolPersistTrackedPlayersThroughRounds = strValue == "Yes";
                         break;
                     
-                    case "Select monitored vehicle":
+                    case "Select monitored weapon":
                         _dictWeaponEnforcersLookup[enforcerId].StrCurrentlyMonitoredWeapons = CPluginVariable.DecodeStringArray(strValue);
                         break;
                     
@@ -316,11 +317,14 @@ namespace PRoConEvents
             if (kKillerVictimDetails.Killer.SoldierName == string.Empty ||
                 kKillerVictimDetails.Killer.SoldierName == "" || kKillerVictimDetails.Killer.SoldierName == " " ||
                 kKillerVictimDetails.Killer.SoldierName == kKillerVictimDetails.Victim.SoldierName) return;
+
+            //Humanize the weapon name
+            var weaponName = GetDecodedWeaponName(kKillerVictimDetails.DamageType);
             
-            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{kKillerVictimDetails.DamageType}'", 6);
+            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{weaponName}'", 5);
 
             // Find the first WeaponEnforcer that monitors the weapon used by the killer
-            var weaponEnforcer = _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(kKillerVictimDetails.DamageType));
+            var weaponEnforcer = _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(weaponName));
 
             //Run all Enforcer logic in a separate thread
             var weaponEnforcerThread = new Thread(() =>
@@ -340,6 +344,43 @@ namespace PRoConEvents
         #endregion PRoConPluginAPI
 
         #region Helper Methods
+        
+        private void ValidateParsedValues(string strVariable, string strValue)
+        {
+            try
+            {
+                switch (strVariable)
+                {
+                    /* ===== 2. Weapon Enforcers ===== */
+                    case "Spawn new Weapon Enforcer?":
+                        if (_blnCreateNewWeaponEnforcer)
+                        {
+                            CreateNewWeaponEnforcer();
+                            _blnCreateNewWeaponEnforcer = false;
+                        }
+                        break;
+                    
+                    case "Weapon Enforcer deletion ID":
+                        DeleteWeaponEnforcerById(int.Parse(strValue));
+                        _intWeaponEnforcerDeletionId = 0;
+                        break;
+
+                    /* ===== 99. Debugging ===== */
+                    case "Debug level":
+                        if (int.Parse(strValue) < 0 || int.Parse(strValue) > 10)
+                        {
+                            Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
+                            Logger.IntDebugLevel = 0;
+                        }
+                        else Logger.IntDebugLevel = int.Parse(strValue);
+                        break;
+                }   
+            }
+            catch (Exception e)
+            {
+                Logger.Exception(e);
+            }
+        }
 
         private void CheckForPluginUpdate()
         {
@@ -378,56 +419,70 @@ namespace PRoConEvents
             
             Hashtable humanizedWeaponNames;
 
-            using (var webClient = new WebClient())
+            using (var client = new GZipWebClient(compress: false))
             {
-                Logger.Debug(() => "Downloading humanized weapon names from GitHub.", 2);
+                string downloadString;
+                try
+                {
+                    downloadString = ClientDownloadTimer(client, StrHumanWeaponNamesUrl + "?cacherand=" + Environment.TickCount);
+                    Logger.Debug(() => "Weapon names downloaded successfully", 1);
+                }
+                catch (Exception e)
+                {
+                    Logger.Exception(e);
+                    return null;
+                }
                 
-                var response = webClient.DownloadString(StrHumanWeaponNamesUrl);
-                humanizedWeaponNames = (Hashtable)JSON.JsonDecode(response);
-                
-                Logger.Debug(() => humanizedWeaponNames.ToString(), 7);
+                humanizedWeaponNames = (Hashtable)JSON.JsonDecode(downloadString);
             }
 
             Logger.Debug(() => "Exiting FetchHumanizedWeaponNames", 7);
-            
+
             return humanizedWeaponNames;
         }
 
-        private void ValidateParsedValues(string strVariable, string strValue)
+        public string GetDecodedWeaponName(string engineWeaponName)
         {
-            try
+            var readableWeaponNames = (Hashtable)_hshTblHumanWeaponNames[engineWeaponName];
+            var playerWeapon = string.Empty;
+            
+            foreach (var weaponName in readableWeaponNames.Cast<DictionaryEntry>().Where(weaponName => weaponName.Key.ToString() == "readable_long"))
             {
-                switch (strVariable)
-                {
-                    /* ===== 2. Weapon Enforcers ===== */
-                    case "Spawn new Weapon Enforcer?":
-                        if (_blnSpawnNewWeaponEnforcer)
-                        {
-                            CreateNewWeaponEnforcer();
-                            _blnSpawnNewWeaponEnforcer = false;
-                        }
-                        break;
-                    
-                    case "Weapon Enforcer deletion ID":
-                        DeleteWeaponEnforcerById(int.Parse(strValue));
-                        _intWeaponEnforcerDeletionId = 0;
-                        break;
+                playerWeapon = weaponName.Value.ToString();
+            }
+            
+            return playerWeapon;
+        }
+        
+        private string ClientDownloadTimer(GZipWebClient webClient, string url)
+        {
+            Logger.Debug(() => "Preparing to download from " + GetDomainName(url), 7);
+            
+            var timer = new Stopwatch();
+            timer.Start();
+            var returnString = webClient.GZipDownloadString(url);
+            timer.Stop();
+            
+            Logger.Debug(() => "Downloaded from " + GetDomainName(url) + " in " + timer.ElapsedMilliseconds + "ms", 7);
+            
+            return returnString;
+        }
 
-                            /* ===== 99. Debugging ===== */
-                    case "Debug level":
-                        if (int.Parse(strValue) < 0 || int.Parse(strValue) > 10)
-                        {
-                            Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
-                            Logger.IntDebugLevel = 0;
-                        }
-                        else Logger.IntDebugLevel = int.Parse(strValue);
-                        break;
-                }   
-            }
-            catch (Exception e)
-            {
-                Logger.Exception(e);
-            }
+        private static string GetDomainName(string url)
+        {
+            var domain = new Uri(url).DnsSafeHost.ToLower();
+            
+            var tokens = domain.Split('.');
+            
+            if (tokens.Length <= 2) return domain;
+            
+            //Add only second level exceptions to the < 3 rule here
+            string[] exceptions = { "info", "firm", "name", "com", "biz", "gen", "ltd", "web", "net", "pro", "org" };
+            
+            var validTokens = 2 + (tokens[tokens.Length - 2].Length < 3 || exceptions.Contains(tokens[tokens.Length - 2]) ? 1 : 0);
+            
+            domain = string.Join(".", tokens, tokens.Length - validTokens, validTokens);
+            return domain;
         }
 
         #endregion
@@ -542,7 +597,7 @@ namespace PRoConEvents
 
             EnforcerState = WeaponEnforcerState.Disabled;
             BoolEnforceSingleInstanceWeapon = true;
-            StrCurrentlyMonitoredWeapons = new string[] { "Gameplay/Vehicles/AH1Z/AH1Z", "Gameplay/Vehicles/AH6/AH6_Littlebird", "Gameplay/Vehicles/F35/F35B", "Gameplay/Vehicles/M1A2/M1Abrams", "Gameplay/Vehicles/CH_MBT_Type99/CH_MBT_Type99" };
+            StrCurrentlyMonitoredWeapons = new[] { "AH-1Z Viper", "Type 99 MBT", "M1 Abrams MBT", "LAV-25 APC" };
             BoolPersistTrackedPlayersThroughRounds = true;
             IntMinRequiredKills = 0;
             BoolAllowHigherTotalKillsForReservedSlotPlayers = true;
@@ -557,7 +612,7 @@ namespace PRoConEvents
         {
             //Type safe plugin variable creation
             CPluginVariable StringPluginVariable(string name, string value) => new CPluginVariable(name, typeof(string), value);
-            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value.PrepareSafely(true));
+            CPluginVariable StringArrayPluginVariable(string name, IEnumerable<string> value) => new CPluginVariable(name, typeof(string[]), value);
             CPluginVariable FloatPluginVariable(string name, float value) => new CPluginVariable(name, typeof(string), value.ToString("0.00", CultureInfo.InvariantCulture.NumberFormat));
             CPluginVariable IntPluginVariable(string name, int value) => new CPluginVariable(name, typeof(int), value);
             CPluginVariable BoolPluginVariable(string name, bool value) => new CPluginVariable(name, typeof(bool), value);
@@ -588,43 +643,70 @@ namespace PRoConEvents
             if (EnforcerState == WeaponEnforcerState.Disabled) return;
             
             //Track the player's weapon and how often they've used it
-            var playerWeapon = kKillerVictimDetails.DamageType;
             var killerSoldierName = kKillerVictimDetails.Killer.SoldierName;
-            var victimSoldierName = kKillerVictimDetails.Victim.SoldierName;
-            
+            var playerWeapon = _plugin.GetDecodedWeaponName(kKillerVictimDetails.DamageType);
+
             _plugin.Logger.Debug(() => $"Currently tracking player '{killerSoldierName}' with '{playerWeapon}' on Enforcer #{_strEnforcerId}", 8);
 
             //Soldier hasn't been tracked yet so every weapon is new
             if (!_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName))
             {
-                _plugin.Logger.Debug(() => $"Adding new player '{killerSoldierName}' to tracked players", 8);
-                _dictTrackedPlayers.Add(killerSoldierName, new List<Dictionary<string, int>>()
-                {
-                    new Dictionary<string, int>()
-                    {
-                        { playerWeapon, 1 }
-                    }
-                });
+                AddFirstTrackingEntry(killerSoldierName, playerWeapon);
             }
 
             //Soldier has been tracked but the weapon they're using hasn't been tracked yet
             else if (!_dictTrackedPlayers[killerSoldierName].Any(x => x.ContainsKey(playerWeapon)))
             {
-                _plugin.Logger.Debug(() => $"Adding new weapon '{playerWeapon}' to tracked weapons for player '{killerSoldierName}'", 8);
-                _dictTrackedPlayers[killerSoldierName].Add(new Dictionary<string, int>()
-                {
-                    { playerWeapon, 1 }
-                });
+                AddTrackedWeaponToSoldier(killerSoldierName, playerWeapon);
             }
 
             //Soldier has been tracked and the weapon they're using has been tracked
             //So we just need to increment the weapon's usage count
             else
             {
-                _dictTrackedPlayers[killerSoldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
-                var weaponUsageCount = _dictTrackedPlayers[killerSoldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
-                _plugin.Logger.Debug(() => $"Incrementing weapon {playerWeapon} usage count for player {killerSoldierName} to {weaponUsageCount}", 8);
+                IncrementCountOnTrackedWeapon(killerSoldierName, playerWeapon);
             }
+        }
+        
+        private void AddFirstTrackingEntry(string soldierName, string playerWeapon)
+        {
+            _plugin.Logger.Debug(() => "Starting up AddFirstTrackingEntry", 7);
+            
+            _dictTrackedPlayers.Add(soldierName, new List<Dictionary<string, int>>()
+            {
+                new Dictionary<string, int>()
+                {
+                    { playerWeapon, 1 }
+                }
+            });
+            _plugin.Logger.Debug(() => $"Added new player '{soldierName}' to tracked players", 3);
+            
+            _plugin.Logger.Debug(() => "Exiting AddFirstTrackingEntry", 7);
+        }
+
+        private void AddTrackedWeaponToSoldier(string soldierName, string playerWeapon)
+        {
+            _plugin.Logger.Debug(() => "Starting up AddTrackedWeaponToSoldier", 7);
+            
+            _dictTrackedPlayers[soldierName].Add(new Dictionary<string, int>()
+            {
+                { playerWeapon, 1 }
+            });
+            
+            _plugin.Logger.Debug(() => $"Added new weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'", 3);
+            
+            _plugin.Logger.Debug(() => "Exiting AddTrackedWeaponToSoldier", 7);
+        }
+
+        private void IncrementCountOnTrackedWeapon(string soldierName, string playerWeapon)
+        {
+            _plugin.Logger.Debug(() => "Starting up IncrementCountOnTrackedWeapon", 7);
+            
+            _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
+            var weaponUsageCount = _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
+            _plugin.Logger.Debug(() => $"Incremented count for player {soldierName} with {playerWeapon} to {weaponUsageCount}", 3);
+            
+            _plugin.Logger.Debug(() => "Exiting IncrementCountOnTrackedWeapon", 7);
         }
 
         private string GetFullName()
@@ -688,6 +770,8 @@ namespace PRoConEvents
             return @"This plugin is designed to help you manage farming players on your server.
                     It will automatically detect and act upon players who are farming.";
         }
+        
+        
     }
 
     #endregion class FarmingManagerUtilities
@@ -872,6 +956,61 @@ namespace PRoConEvents
 
     #endregion class Logger
 
+    #region class GZipWebClient
+
+    public class GZipWebClient : WebClient
+    {
+        private readonly string _userAgent;
+        private readonly bool _compress;
+        
+        public GZipWebClient(string userAgent = "Mozilla/5.0 (compatible; PRoCon 1; Farming-Manager", bool compress = true)
+        {
+            _userAgent = userAgent;
+            _compress = compress;
+            base.Headers["User-Agent"] = _userAgent;
+        }
+
+        public string GZipDownloadString(string address)
+        {
+            return this.GZipDownloadString(new Uri(address));
+        }
+
+        private string GZipDownloadString(Uri address)
+        {
+            base.Headers[HttpRequestHeader.UserAgent] = _userAgent;
+
+            if (_compress == false)
+                return base.DownloadString(address);
+
+            base.Headers[HttpRequestHeader.AcceptEncoding] = "gzip";
+            var stream = this.OpenRead(address);
+            if (stream == null)
+                return "";
+
+            var contentEncoding = ResponseHeaders[HttpResponseHeader.ContentEncoding];
+            base.Headers.Remove(HttpRequestHeader.AcceptEncoding);
+
+            Stream decompressedStream = null;
+            StreamReader reader = null;
+            if (!string.IsNullOrEmpty(contentEncoding) && contentEncoding.ToLower().Contains("gzip"))
+            {
+                decompressedStream = new GZipStream(stream, CompressionMode.Decompress);
+                reader = new StreamReader(decompressedStream);
+            }
+            else
+            {
+                reader = new StreamReader(stream);
+            }
+            var data = reader.ReadToEnd();
+            reader.Close();
+            decompressedStream?.Close();
+            stream.Close();
+            return data;
+        }
+    }
+    
+    #endregion class GZipWebClient
+    
     #region class DiscordWebhook
 
     public class DiscordWebhook
