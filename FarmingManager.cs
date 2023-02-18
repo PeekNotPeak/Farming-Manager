@@ -23,7 +23,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.1.5";
+        private const string StrPluginVersion = "0.1.6";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         
@@ -96,6 +96,8 @@ namespace PRoConEvents
 
         public void OnPluginLoaded(string strHostName, string strPort, string strPRoConVersion)
         {
+            Logger.Debug(() => "Received OnPluginLoaded Event", 7);
+            
             var events = new[]
             {
                 /* Miscellaneous */
@@ -111,18 +113,27 @@ namespace PRoConEvents
             RegisterEvents(GetType().Name, events);
             
             LoadSavedWeaponEnforcers();
+            
+            Logger.Debug(() => "Exiting OnPluginLoaded Event", 7);
         }
 
         public void OnPluginEnable()
         {
+            Logger.Debug(() => "Received OnPluginEnable Event", 7);
+            
             Logger.Write($"Plugin enabled. Running on version {GetPluginVersion()}.");
-
             _hshtblHumanWeaponNames = FetchHumanizedWeaponNames();
+            
+            Logger.Debug(() => "Exiting OnPluginEnable Event", 7);
         }
 
         public void OnPluginDisable()
         {
+            Logger.Debug(() => "Received OnPluginDisable Event", 7);
+            
             Logger.Write("Plugin successfully shut down.");
+            
+            Logger.Debug(() => "Exiting OnPluginDisable Event", 7);
         }
         
         /* ==== Variable Handling ==== */
@@ -173,7 +184,6 @@ namespace PRoConEvents
         {
             if (strVariable.Contains('|')) strVariable = strVariable.Substring(strVariable.IndexOf('|') + 1);
             
-            Logger.Debug(() => $"Setting variable '{strVariable}' to value '{strValue}'".Trim(), 7);
             try
             {
                 switch (strVariable)
@@ -273,17 +283,27 @@ namespace PRoConEvents
         
         public override void OnAccountLogin(string strSoldierName, string ip, CPrivileges privileges)
         {
+            Logger.Debug(() => "Received OnAccountLogin Event", 7);
+            
             if (!_blnDoPluginUpdateCheck) return;
             CheckForPluginUpdate();
+            
+            Logger.Debug(() => "Exiting OnAccountLogin Event", 7);
         }
 
         public override void OnServerInfo(CServerInfo csiServerInfo)
         {
+            Logger.Debug(() => "Received OnServerInfo Event", 7);
+            
             if (_blnIsPluginEnabled) SaveCurrentWeaponEnforcers();
+            
+            Logger.Debug(() => "Exiting OnServerInfo Event", 7);
         }
 
         public override void OnPlayerKilled(Kill kKillerVictimDetails)
         {
+            Logger.Debug(() => "Received OnPlayerKilled Event", 7);
+
             if (!_blnIsPluginEnabled) return;
             
             // We don't want to count area or explosion damage nor collisions or suicides
@@ -297,7 +317,7 @@ namespace PRoConEvents
                 kKillerVictimDetails.Killer.SoldierName == "" || kKillerVictimDetails.Killer.SoldierName == " " ||
                 kKillerVictimDetails.Killer.SoldierName == kKillerVictimDetails.Victim.SoldierName) return;
             
-            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{kKillerVictimDetails.DamageType}'", 10);
+            Logger.Debug(() => $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{kKillerVictimDetails.DamageType}'", 6);
 
             // Find the first WeaponEnforcer that monitors the weapon used by the killer
             var weaponEnforcer = _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(kKillerVictimDetails.DamageType));
@@ -314,6 +334,7 @@ namespace PRoConEvents
 
             ThreadPool.QueueUserWorkItem(_ => weaponEnforcerThread.Start());
 
+            Logger.Debug(() => "Exiting OnPlayerKilled Event", 7);
         }
 
         #endregion PRoConPluginAPI
@@ -322,6 +343,8 @@ namespace PRoConEvents
 
         private void CheckForPluginUpdate()
         {
+            Logger.Debug(() => "Starting up CheckForPluginUpdate", 7);
+            
             var latestVersion = "Unknown";
             
             var pluginUpdateThread = new Thread(() =>
@@ -346,7 +369,7 @@ namespace PRoConEvents
             };
             pluginUpdateThread.Start();
             
-            Logger.Debug(() => "Received version info from GitHub: " + latestVersion, 10);
+            Logger.Debug(() => "Exiting CheckForPluginUpdate", 7);
         }
 
         private Hashtable FetchHumanizedWeaponNames()
@@ -361,8 +384,10 @@ namespace PRoConEvents
                 
                 var response = webClient.DownloadString(StrHumanWeaponNamesUrl);
                 humanizedWeaponNames = (Hashtable)JSON.JsonDecode(response);
+                
+                Logger.Debug(() => humanizedWeaponNames.ToString(), 7);
             }
-            
+
             Logger.Debug(() => "Exiting FetchHumanizedWeaponNames", 7);
             
             return humanizedWeaponNames;
@@ -411,10 +436,13 @@ namespace PRoConEvents
 
         private void CreateNewWeaponEnforcer()
         {
+            Logger.Debug(() => "Starting up CreateNewWeaponEnforcer", 7);
+            
             var id = GetNextWeaponEnforcerId();
             _dictWeaponEnforcersLookup.Add(id, new WeaponEnforcer(this, id));
+            Logger.Debug(() => $"Created new Weapon Enforcer with ID {id}", 2);
             
-            Logger.Debug(() => $"Created new Weapon Enforcer with ID {id}", 8);
+            Logger.Debug(() => "Exiting CreateNewWeaponEnforcer", 7);
         }
 
         private List<int> GetSortedWeaponEnforcerIds()
@@ -447,27 +475,33 @@ namespace PRoConEvents
 
         private void DeleteWeaponEnforcerById(int handlerId)
         {
-            if (handlerId == 0 || !_dictWeaponEnforcersLookup.ContainsKey(handlerId.ToString())) return;
-
-            _dictWeaponEnforcersLookup.Remove(handlerId.ToString());
+            Logger.Debug(() => "Starting up DeleteWeaponEnforcerById", 7);
             
-            Logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 8);
+            if (handlerId == 0 || !_dictWeaponEnforcersLookup.ContainsKey(handlerId.ToString())) return;
+            _dictWeaponEnforcersLookup.Remove(handlerId.ToString());
+            Logger.Debug(() => $"Deleted Weapon Enforcer with ID {handlerId}", 2);
+            
+            Logger.Debug(() => "Exiting DeleteWeaponEnforcerById", 7);
         }
         
         private void SaveCurrentWeaponEnforcers()
         {
+            Logger.Debug(() => "Starting up SaveCurrentWeaponEnforcers", 7);
+            
             if (_dictWeaponEnforcersLookup.Count >= 0) return;
-            Logger.Debug((() => $"Saving current Weapon Enforcers to {StrWeaponEnforcersSavePath}..."), 10);
-
             //TODO: Add saving of current weapon enforcers
+            
+            Logger.Debug(() => "Exiting SaveCurrentWeaponEnforcers", 7);
         }
         
         private void LoadSavedWeaponEnforcers()
         {
-            if (!File.Exists(StrWeaponEnforcersSavePath)) return;
-            Logger.Debug((() => $"Loading saved Weapon Enforcers from {StrWeaponEnforcersSavePath}..."), 10);
+            Logger.Debug(() => "Starting up LoadSavedWeaponEnforcers", 7);
             
+            if (!File.Exists(StrWeaponEnforcersSavePath)) return;
             //TODO: Add loading of saved weapon enforcers
+            
+            Logger.Debug(() => "Exiting LoadSavedWeaponEnforcers", 7);
         }
 
         #endregion Weapon Enforcers Helper Methods
@@ -558,12 +592,12 @@ namespace PRoConEvents
             var killerSoldierName = kKillerVictimDetails.Killer.SoldierName;
             var victimSoldierName = kKillerVictimDetails.Victim.SoldierName;
             
-            _plugin.Logger.Debug(() => $"Currently tracking player '{killerSoldierName}' with '{playerWeapon}' on Enforcer #{_strEnforcerId}", 10);
+            _plugin.Logger.Debug(() => $"Currently tracking player '{killerSoldierName}' with '{playerWeapon}' on Enforcer #{_strEnforcerId}", 8);
 
             //Soldier hasn't been tracked yet so every weapon is new
             if (!_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName))
             {
-                _plugin.Logger.Debug(() => $"Adding new player '{killerSoldierName}' to tracked players", 10);
+                _plugin.Logger.Debug(() => $"Adding new player '{killerSoldierName}' to tracked players", 8);
                 _dictTrackedPlayers.Add(killerSoldierName, new List<Dictionary<string, int>>()
                 {
                     new Dictionary<string, int>()
@@ -576,7 +610,7 @@ namespace PRoConEvents
             //Soldier has been tracked but the weapon they're using hasn't been tracked yet
             else if (!_dictTrackedPlayers[killerSoldierName].Any(x => x.ContainsKey(playerWeapon)))
             {
-                _plugin.Logger.Debug(() => $"Adding new weapon '{playerWeapon}' to tracked weapons for player '{killerSoldierName}'", 10);
+                _plugin.Logger.Debug(() => $"Adding new weapon '{playerWeapon}' to tracked weapons for player '{killerSoldierName}'", 8);
                 _dictTrackedPlayers[killerSoldierName].Add(new Dictionary<string, int>()
                 {
                     { playerWeapon, 1 }
@@ -589,7 +623,7 @@ namespace PRoConEvents
             {
                 _dictTrackedPlayers[killerSoldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
                 var weaponUsageCount = _dictTrackedPlayers[killerSoldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
-                _plugin.Logger.Debug(() => $"Incrementing weapon {playerWeapon} usage count for player {killerSoldierName} to {weaponUsageCount}", 10);
+                _plugin.Logger.Debug(() => $"Incrementing weapon {playerWeapon} usage count for player {killerSoldierName} to {weaponUsageCount}", 8);
             }
         }
 
