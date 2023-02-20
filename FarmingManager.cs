@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.3.0";
+        private const string StrPluginVersion = "0.5.0";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
 
@@ -595,10 +595,17 @@ namespace PRoConEvents
             ExecuteCommand("procon.protected.send", "admin.say", message, "player", soldierName);
         }
 
-        public void SendPlayerYell(string soldierName, string message, int duration, bool doLogging = true)
+        public void SendPlayerYell(string soldierName, string message, int duration)
         {
             message = "[" + GetPluginName().ToUpper() + "] " + message;
             ExecuteCommand("procon.protected.send", "admin.yell", message, duration.ToString(), "player", soldierName);
+        }
+
+        public void SendPlayerTell(string soldierName, string message, int duration = 5)
+        {
+            message = "[" + GetPluginName().ToUpper() + "] " + message;
+            ExecuteCommand("procon.protected.send", "admin.yell", message, duration.ToString(), "player", soldierName);
+            ExecuteCommand("procon.protected.send", "admin.say", message, "player", soldierName);
         }
 
         #endregion
@@ -748,7 +755,7 @@ namespace PRoConEvents
         public bool BoolAllowHigherTotalKillsForReservedSlotPlayers;
         public int IntMinRequiredKillsForReservedSlotPlayers;
         public int IntMaximumWarningsReservedSlotPlayers;
-        private Dictionary<string, int> _dictTotalPlayerWarnings;
+        private readonly Dictionary<string, int> _dictTotalPlayerWarnings;
         public float FloatMaxAllowedKpm;
         public float FloatMaxAllowedKdr;
 
@@ -821,10 +828,10 @@ namespace PRoConEvents
                 BoolYesNoPluginVariable(
                     GetFullName() + $"|#[4.{_strEnforcerId}] Persist tracked players through rounds?",
                     BoolPersistTrackedPlayersThroughRounds),
-                FloatPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum allowed KPM",
-                    FloatMaxAllowedKpm),
                 FloatPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum allowed KDR",
                     FloatMaxAllowedKdr),
+                FloatPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum allowed KPM",
+                    FloatMaxAllowedKpm),
                 IntPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set minimum required kills",
                     IntMinRequiredKills),
                 IntPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum warnings",
@@ -848,40 +855,35 @@ namespace PRoConEvents
         public void ProcessWeaponKill(Kill kKillerVictimDetails)
         {
             _plugin.Logger.Debug(() => $"Starting up ProcessWeaponKill for Enforcer #{_strEnforcerId}", 7);
-
-            //If the enforcer is disabled, we want to immediately return
-            //However we allow virtual mode and obviously enabled mode
+            
             if (EnforcerState == WeaponEnforcerState.Disabled) return;
-
-            //If current time is not within the allowed time frame, we want to return
-            //TODO: Add time based enforcement
+            
             if (!CurrentTimeWithinAllowedTimeFrameCheck()) return;
-
-            //Local variables for readability
+            
             var soldierName = kKillerVictimDetails.Killer.SoldierName;
             var playerWeapon = _plugin.GetDecodedWeaponName(kKillerVictimDetails.DamageType);
 
-            //Soldier hasn't been tracked yet so we need to start the initial check
-            if (!_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName))
+            switch (true)
             {
-                StartInitialCheck(soldierName, playerWeapon);
-                return;
+                //Soldier hasn't been tracked yet so we need to start the initial check
+                case true when !_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName):
+                    StartInitialCheck(soldierName, playerWeapon);
+                    break;
+                
+                //Soldier has been tracked but the weapon they're using hasn't been tracked yet
+                case true when !_dictTrackedPlayers[soldierName].Any(x => x.ContainsKey(playerWeapon)):
+                    AddTrackedWeaponToSoldier(soldierName, playerWeapon);
+                    break;
+                
+                //Soldier has been tracked and the weapon they're using has been tracked
+                //So we just need to increment the weapon's usage count
+                //Lastly go through the tracked player again and check if they exceeded some limit
+                default:
+                    IncrementCountOnTrackedWeapon(soldierName, playerWeapon);
+                    LastCheckUpOnPlayer(kKillerVictimDetails.Killer, playerWeapon);
+                    break;
             }
-
-            //Soldier has been tracked but the weapon they're using hasn't been tracked yet
-            if (!_dictTrackedPlayers[soldierName].Any(x => x.ContainsKey(playerWeapon)))
-            {
-                AddTrackedWeaponToSoldier(soldierName, playerWeapon);
-                return;
-            }
-
-            //Soldier has been tracked and the weapon they're using has been tracked
-            //So we just need to increment the weapon's usage count
-            IncrementCountOnTrackedWeapon(soldierName, playerWeapon);
-
-            //Lastly go through the tracked player again and check if they exceeded some limit
-            LastCheckUpOnPlayer(kKillerVictimDetails.Killer, playerWeapon);
-
+            
             _plugin.Logger.Debug(() => $"Exiting ProcessWeaponKill for Enforcer #{_strEnforcerId}", 7);
         }
 
@@ -891,7 +893,7 @@ namespace PRoConEvents
 
             //TODO: Add time based enforcement
             var currentTime = DateTime.Now;
-            _plugin.Logger.Debug(() => $"Current time is {currentTime}", 3);
+            _plugin.Logger.Warn("SIMULATING TIME LOGIC - CURRENT TIME: " + currentTime);
 
             _plugin.Logger.Debug(() => "Exiting CurrentTimeWithinAllowedTimeFrameCheck", 7);
 
@@ -901,88 +903,118 @@ namespace PRoConEvents
         private void StartInitialCheck(string soldierName, string playerWeapon)
         {
             _plugin.Logger.Debug(() => "Starting up StartInitialCheck", 7);
-
-            AddFirstTrackingEntry(soldierName, playerWeapon);
-
-            //Send the player a message that they are being monitored if the option is enabled
-            if (_plugin.BoolAllowFirstEnforcementMessage)
+            
+            if (EnforcerState != WeaponEnforcerState.Virtual)
             {
-                if (EnforcerState != WeaponEnforcerState.Virtual)
-                {
-                    _plugin.SendPlayerYell(soldierName,
+                AddFirstTrackingEntry(soldierName, playerWeapon);
+                if (BoolLogToPRoConChat)
+                    _plugin.LogToPRoConChat(
+                        $"Enforcer #{_strEnforcerId}: Now monitoring '{soldierName}' for weapon '{playerWeapon}'");
+
+                if (_plugin.BoolAllowFirstEnforcementMessage)
+                    _plugin.SendPlayerTell(soldierName,
                         $"You are now being monitored by Enforcer #{_strEnforcerId} for weapon {playerWeapon}", 10);
-                    _plugin.SendPlayerMessage(soldierName,
-                        $"You are now being monitored by Enforcer #{_strEnforcerId} for weapon {playerWeapon}");
-                }
-                else
-                {
-                    _plugin.Logger.Debug(
-                        () =>
-                            $"Enforcer #{_strEnforcerId} is in virtual mode, so no first track message will be sent to {soldierName}",
-                        3);
-                }
+
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Now monitoring '{soldierName}' for weapon '{playerWeapon}'",
+                    3);
+            }
+            else
+            {
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing InitialCheck for '{soldierName}'",
+                    3);
             }
 
-            //Log the message to the console if the option is enabled
-            if (BoolLogToPRoConChat && EnforcerState != WeaponEnforcerState.Virtual)
-                _plugin.LogToPRoConChat(
-                    $"Enforcer #{_strEnforcerId} is now monitoring '{soldierName}' for weapon '{playerWeapon}'");
-
             _plugin.Logger.Debug(() => "Exiting StartInitialCheck", 7);
+        }
+
+        private void AddTrackedWeaponToSoldier(string soldierName, string playerWeapon)
+        {
+            _plugin.Logger.Debug(() => "Starting up AddTrackedWeaponToSoldier", 7);
+
+            if (EnforcerState != WeaponEnforcerState.Virtual)
+            {
+                _dictTrackedPlayers[soldierName].Add(new Dictionary<string, int>
+                {
+                    { playerWeapon, 1 }
+                });
+
+                if (BoolLogToPRoConChat)
+                    _plugin.LogToPRoConChat(
+                        $"Enforcer #{_strEnforcerId}: Added weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'");
+                
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Added weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'",
+                    3);
+            }
+            else
+            {
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing AddTrackedWeaponToSoldier for '{soldierName}'",
+                    3);
+            }
+
+            _plugin.Logger.Debug(() => "Exiting AddTrackedWeaponToSoldier", 7);
+        }
+        
+        private void IncrementCountOnTrackedWeapon(string soldierName, string playerWeapon)
+        {
+            _plugin.Logger.Debug(() => "Starting up IncrementCountOnTrackedWeapon", 7);
+
+            _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
+            var weaponUsageCount =
+                _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
+            _plugin.Logger.Debug(
+                () => $"Enforcer #{_strEnforcerId}: Counted up on {soldierName} with {playerWeapon} to {weaponUsageCount}", 3);
+
+            _plugin.Logger.Debug(() => "Exiting IncrementCountOnTrackedWeapon", 7);
         }
 
         private void LastCheckUpOnPlayer(CPlayerInfo player, string weapon)
         {
             _plugin.Logger.Debug(() => "Starting up LastCheckUpOnPlayer", 7);
 
-            var minRequiredKills = IntMinRequiredKills;
-            if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
-                _plugin.LstCurrentReservedSlotPlayers.Contains(player.SoldierName))
-                minRequiredKills = IntMinRequiredKillsForReservedSlotPlayers;
+            var minRequiredKills = GetMinimumRequiredKillsForPlayer(player.SoldierName);
 
             //Compute the 25% of the minimum required kills and cast it to int
             var minRequiredKills25Percent = (int)Math.Round(minRequiredKills * 0.25);
-
-            //Notify the player once they reach 25% of the minimum required kills with the specific weapon
-            if (_dictTrackedPlayers[player.SoldierName]
-                .Any(x => x.ContainsKey(weapon) && x[weapon] == minRequiredKills25Percent))
-            {
-                DoPercentNotification(player.SoldierName, weapon, "25%");
-                return;
-            }
-
-            //Notify the player once they reach 50% of the minimum required kills with the specific weapon
-            if (_dictTrackedPlayers[player.SoldierName]
-                .Any(x => x.ContainsKey(weapon) && x[weapon] == minRequiredKills25Percent * 2))
-            {
-                DoPercentNotification(player.SoldierName, weapon, "50%");
-                return;
-            }
-
-            //Notify the player once they reach 75% of the minimum required kills with the specific weapon
-            if (_dictTrackedPlayers[player.SoldierName]
-                .Any(x => x.ContainsKey(weapon) && x[weapon] == minRequiredKills25Percent * 3))
-            {
-                DoPercentNotification(player.SoldierName, weapon, "75%");
-                return;
-            }
-
-            //Notify the player once they reach 100% of the minimum required kills with the specific weapon
-            if (_dictTrackedPlayers[player.SoldierName]
-                .Any(x => x.ContainsKey(weapon) && x[weapon] == minRequiredKills))
-            {
-                DoPercentNotification(player.SoldierName, weapon, "100%");
-                return;
-            }
             
-            //Once the player has gone beyond the minimum required kills warn him until he hits the maximum allowed kills
-            if (_dictTrackedPlayers[player.SoldierName]
-                .Any(x => x.ContainsKey(weapon) && x[weapon] > minRequiredKills))
+            var weaponUsageCount = _dictTrackedPlayers[player.SoldierName]
+                .First(x => x.ContainsKey(weapon))[weapon];
+
+            switch (true)
             {
-                HandleEnforcementPunishment(player, weapon);
-                return;
+                //Notify the player once they reach 25% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills25Percent:
+                    DoPercentNotification(player.SoldierName, weapon, "25%");
+                    return;
+                
+                //Notify the player once they reach 50% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills25Percent * 2:
+                    DoPercentNotification(player.SoldierName, weapon, "50%");
+                    return;
+                
+                //Notify the player once they reach 75% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills25Percent * 3:
+                    DoPercentNotification(player.SoldierName, weapon, "75%");
+                    return;
+                
+                //Notify the player once they reach 100% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills:
+                    DoPercentNotification(player.SoldierName, weapon, "100%");
+                    return;
+                
+                //At this point the player is beyond the minimum required kills
+                case true when weaponUsageCount > minRequiredKills:
+                    HandleEnforcementPunishment(player, weapon);
+                    return;
             }
-            
+
             _plugin.Logger.Debug(() => "Exiting LastCheckUpOnPlayer", 7);
         }
 
@@ -990,62 +1022,56 @@ namespace PRoConEvents
         {
             _plugin.Logger.Debug(() => "Starting up HandleEnforcementPunishment", 7);
             
-            //Define the maximum warnings after exceeding the minimum required kills for the player
-            //If the player is a reserved slot player, we use the maximum warnings for reserved slot players
-            var maximumWarnings = IntMaximumWarnings;
-            if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
-                _plugin.LstCurrentReservedSlotPlayers.Contains(player.SoldierName))
-                maximumWarnings = IntMaximumWarningsReservedSlotPlayers;
+            var maximumWarnings = GetMaximumWarningsForPlayer(player.SoldierName);
             
-            //If its the first time the player has exceeded the minimum required kills start the warning counter
-            if (!_dictTotalPlayerWarnings.ContainsKey(player.SoldierName))
-                _dictTotalPlayerWarnings.Add(player.SoldierName, 1);
-                
-            else
+            AddOrIncrementPlayerWarnings(player.SoldierName);
+
+            var currentWarnings = _dictTotalPlayerWarnings[player.SoldierName];
+
+            var infoMessage = string.Empty;
+
+            switch (true)
             {
-                //If the player has already exceeded the minimum required kills, increment the warning counter
-                _dictTotalPlayerWarnings[player.SoldierName] += 1;
+                case true when currentWarnings == 1 && player.Kdr >= FloatMaxAllowedKdr:
+                    infoMessage = $"Your current KDR is too high [{player.Kdr}/{FloatMaxAllowedKdr}] | This is the first warning!";
+                    break;
+                
+                case true when currentWarnings < maximumWarnings -1 && player.Kdr >= FloatMaxAllowedKdr:
+                    infoMessage = $"Your current KDR is too high [{player.Kdr}/{FloatMaxAllowedKdr}] | Warning [{currentWarnings}/{maximumWarnings}";
+                    break;
+                
+                case true when currentWarnings == maximumWarnings -3 && player.Kdr >= FloatMaxAllowedKdr:
+                    infoMessage = $"Your current KDR is too high [{player.Kdr}/{FloatMaxAllowedKdr}] Please change your play-style or use a different weapon | Warning [{currentWarnings}/{maximumWarnings}";
+                    break;
+                
+                case true when currentWarnings == maximumWarnings -1 && player.Kdr >= FloatMaxAllowedKdr:
+                    infoMessage = $"Your current KDR is too high [{player.Kdr}/{FloatMaxAllowedKdr}] | THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
+                    break;
+
+                //When we're here just punish em
+                case true when currentWarnings == maximumWarnings && player.Kdr >= FloatMaxAllowedKdr:
+                    InitializePunishment(player);
+                    break;
             }
 
-            string message;
-            
-            //Handle KDR
-            if (_dictTotalPlayerWarnings[player.SoldierName] < maximumWarnings && player.Kdr > FloatMaxAllowedKdr)
-            {
-                message = $"Your current KDR ({player.Kdr}) is too high. Please change your play-style";
-                
-                if (_dictTotalPlayerWarnings[player.SoldierName] == 1)
-                    message = message + $"{_dictTotalPlayerWarnings[player.SoldierName]} out of {maximumWarnings} warnings";
-                
-                
-            }
-            else if (_dictTotalPlayerWarnings[player.SoldierName] == maximumWarnings && player.Kdr > FloatMaxAllowedKdr)
-            {
-                message = $"Your current KDR ({player.Kdr}) is too high. THIS IS THE LAST WARNING BEFORE PUNISHMENT!";
-            }
-
-            //At this point we know that the player has exceeded the minimum required kills and has been warned
-            //Just punish him
-            else
-            {
-                _plugin.Logger.Warn("SIMULATING PUNISHMENT OF PLAYER " + player.SoldierName);
-                return;
-            }
-            
-            //Show the message
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
-                if (message == string.Empty) return;
-
-                if (BoolLogToPRoConChat)
-                    _plugin.LogToPRoConChat(
-                        $"Enforcer #{_strEnforcerId} warned {player.SoldierName} of too high KDR with weapon {weapon} ({_dictTotalPlayerWarnings[player.SoldierName]}/{maximumWarnings})");
-                
-                _plugin.SendPlayerYell(player.SoldierName, message, 10);
-                _plugin.SendPlayerMessage(player.SoldierName, message);
+                if (infoMessage != string.Empty) _plugin.SendPlayerTell(player.SoldierName, infoMessage, 15);
             }
-            
+            else
+            {
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing HandleEnforcementPunishment for '{player.SoldierName}'",
+                    3);
+            }
+
             _plugin.Logger.Debug(() => "Exiting HandleEnforcementPunishment", 7);
+        }
+
+        private void InitializePunishment(CPlayerInfo player)
+        {
+            _plugin.Logger.Warn($"SIMULATING PUNISHMENT OF PLAYER {player.SoldierName} ");
         }
 
         private void DoPercentNotification(string soldierName, string playerWeapon, string percent)
@@ -1056,7 +1082,7 @@ namespace PRoConEvents
                 
                 if (BoolLogToPRoConChat)
                     _plugin.LogToPRoConChat(
-                        $"Enforcer #{_strEnforcerId} has sent {percent} warning message to {soldierName} for weapon {playerWeapon}");
+                        $"Enforcer #{_strEnforcerId}: Sent {percent} warning message to {soldierName} for weapon {playerWeapon}");
 
                 if (percent == "100%")
                 {
@@ -1071,7 +1097,7 @@ namespace PRoConEvents
             {
                 _plugin.Logger.Debug(
                     () =>
-                        $"Enforcer #{_strEnforcerId} is in virtual mode, so no {percent} warning message will be sent to {soldierName}",
+                        $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing DoPercentNotification for '{soldierName}'",
                     3);
             }
         }
@@ -1089,47 +1115,26 @@ namespace PRoConEvents
                 }
             });
             _plugin.Logger.Debug(
-                () => $"Added new player '{soldierName}' to tracked players with weapon '{playerWeapon}'", 3);
+                () => $"Enforcer #{_strEnforcerId}: Added new player '{soldierName}' with weapon '{playerWeapon}'", 3);
 
             _plugin.Logger.Debug(() => "Exiting AddFirstTrackingEntry", 7);
-        }
-
-        private void AddTrackedWeaponToSoldier(string soldierName, string playerWeapon)
-        {
-            _plugin.Logger.Debug(() => "Starting up AddTrackedWeaponToSoldier", 7);
-
-            _dictTrackedPlayers[soldierName].Add(new Dictionary<string, int>
-            {
-                { playerWeapon, 1 }
-            });
-
-            _plugin.Logger.Debug(
-                () => $"Added new weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'", 3);
-
-            _plugin.Logger.Debug(() => "Exiting AddTrackedWeaponToSoldier", 7);
-        }
-
-        private void IncrementCountOnTrackedWeapon(string soldierName, string playerWeapon)
-        {
-            _plugin.Logger.Debug(() => "Starting up IncrementCountOnTrackedWeapon", 7);
-
-            _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon]++;
-            var weaponUsageCount =
-                _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
-            _plugin.Logger.Debug(
-                () => $"Incremented count for player {soldierName} with {playerWeapon} to {weaponUsageCount}", 3);
-
-            _plugin.Logger.Debug(() => "Exiting IncrementCountOnTrackedWeapon", 7);
         }
 
         public void RemoveTrackedPlayer(string soldierName)
         {
             _plugin.Logger.Debug(() => "Starting up RemoveTrackedPlayer", 7);
 
-            if (_dictTrackedPlayers.ContainsKey(soldierName))
+            switch (true)
             {
-                _dictTrackedPlayers.Remove(soldierName);
-                _plugin.Logger.Debug(() => $"Removed player '{soldierName}' from tracked players", 3);
+                case true when _dictTrackedPlayers.ContainsKey(soldierName):
+                    _dictTrackedPlayers.Remove(soldierName);
+                    _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from tracked players", 3);
+                    break;
+                
+                case true when _dictTotalPlayerWarnings.ContainsKey(soldierName):
+                    _dictTotalPlayerWarnings.Remove(soldierName);
+                    _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from total warnings", 3);
+                    break;
             }
 
             _plugin.Logger.Debug(() => "Exiting RemoveTrackedPlayer", 7);
@@ -1142,12 +1147,63 @@ namespace PRoConEvents
             if (!BoolPersistTrackedPlayersThroughRounds)
             {
                 _dictTrackedPlayers.Clear();
-                _plugin.Logger.Debug(() => "Reset all tracked players", 3);
+                _dictTotalPlayerWarnings.Clear();
+                _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Reset all tracked players and warnings", 3);
             }
 
             _plugin.Logger.Debug(() => "Exiting ResetTrackedPlayer", 7);
         }
 
+        private void AddOrIncrementPlayerWarnings(string soldierName)
+        {
+            _plugin.Logger.Debug(() => "Starting up AddOrIncrementPlayerWarnings", 7);
+
+            //If its the first time the player has exceeded the minimum required kills start the warning counter
+            if (!_dictTotalPlayerWarnings.ContainsKey(soldierName)) _dictTotalPlayerWarnings.Add(soldierName, 1);
+
+            //If the player has already exceeded the minimum required kills, increment the warning counter
+            else _dictTotalPlayerWarnings[soldierName] += 1;
+
+            _plugin.Logger.Debug(
+                () =>
+                    $"Enforcer #{_strEnforcerId}: Counted up total warnings on '{soldierName}' to {_dictTotalPlayerWarnings[soldierName]}",
+                3);
+
+            _plugin.Logger.Debug(() => "Exiting AddOrIncrementPlayerWarnings", 7);
+        }
+        
+        private int GetMinimumRequiredKillsForPlayer(string soldierName)
+        {
+            _plugin.Logger.Debug(() => "Starting up GetMinimumRequiredKillsForPlayer", 7);
+            
+            var minRequiredKills = IntMinRequiredKills;
+            if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
+                _plugin.LstCurrentReservedSlotPlayers.Contains(soldierName))
+                minRequiredKills = IntMinRequiredKillsForReservedSlotPlayers;
+            
+            _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Minimum required kills for player '{soldierName}' are {minRequiredKills}", 3);
+            
+            _plugin.Logger.Debug(() => "Exiting GetMinimumRequiredKillsForPlayer", 7);
+            
+            return minRequiredKills;
+        }
+
+        private int GetMaximumWarningsForPlayer(string soldierName)
+        {
+            _plugin.Logger.Debug(() => "Starting up GetMaximumWarningsForPlayer", 7);
+            
+            var maximumWarnings = IntMaximumWarnings;
+            if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
+                _plugin.LstCurrentReservedSlotPlayers.Contains(soldierName))
+                maximumWarnings = IntMaximumWarningsReservedSlotPlayers;
+            
+            _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Maximum warnings for player '{soldierName}' are {maximumWarnings}", 3);
+
+            _plugin.Logger.Debug(() => "Exiting GetMaximumWarningsForPlayer", 7);
+            
+            return maximumWarnings;
+        }
+        
         private string GetFullName()
         {
             return $"4.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
