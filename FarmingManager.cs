@@ -24,13 +24,13 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.5.1";
+        private const string StrPluginVersion = "0.5.2";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
 
         /* ===== 1. Farming-Manager ===== */
-        private bool _blnIsPluginEnabled;
-        private bool _blnDoPluginUpdateCheck;
+        private bool _boolIsPluginEnabled;
+        private bool _boolDoPluginUpdateCheck;
 
         private const string StrPluginUpdateUrl =
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
@@ -38,12 +38,12 @@ namespace PRoConEvents
         public List<string> LstCurrentReservedSlotPlayers;
 
         /* ===== 2. Global Settings ===== */
-        public bool BoolAllowFirstEnforcementMessage;
+        public bool BoolSendInitialEnforcementMessage;
         public bool BoolUseAdKatsForPunishments;
 
         /* ===== 3. Weapon Enforcers ===== */
         private readonly Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
-        private bool _blnCreateNewWeaponEnforcer;
+        private bool _boolCreateNewWeaponEnforcer;
         private int _intWeaponEnforcerDeletionId;
         private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
 
@@ -62,21 +62,20 @@ namespace PRoConEvents
         public FarmingManager()
         {
             /* ===== 1. FarmingManager ===== */
-            _blnIsPluginEnabled = false;
+            _boolIsPluginEnabled = false;
             LstCurrentReservedSlotPlayers = new List<string>();
-            
+
             /* ===== 2. Global Settings ===== */
-            BoolAllowFirstEnforcementMessage = true;
+            BoolSendInitialEnforcementMessage = true;
             BoolUseAdKatsForPunishments = false;
 
             /* ===== 3. Weapon Enforcers ===== */
             _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
-            _blnCreateNewWeaponEnforcer = false;
+            _boolCreateNewWeaponEnforcer = false;
             _intWeaponEnforcerDeletionId = 0;
-           
 
             /* ===== 98. Plugin Update ===== */
-            _blnDoPluginUpdateCheck = true;
+            _boolDoPluginUpdateCheck = true;
 
             /* ===== 99. Debugging ===== */
             Logger = new Logger(this)
@@ -208,18 +207,18 @@ namespace PRoConEvents
             }
 
             /* ===== 1. Farming-Manager ===== */
-            yield return BoolPluginVariable("1. Farming-Manager|Activate the plugin?", _blnIsPluginEnabled);
-            yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _blnDoPluginUpdateCheck);
+            yield return BoolPluginVariable("1. Farming-Manager|Activate the plugin?", _boolIsPluginEnabled);
+            yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _boolDoPluginUpdateCheck);
 
             /* ===== 2. Global Settings ===== */
-            yield return BoolYesNoPluginVariable("2. Global Settings|Allow first enforcement message?",
-                BoolAllowFirstEnforcementMessage);
+            yield return BoolYesNoPluginVariable("2. Global Settings|Send initial enforcement message?",
+                BoolSendInitialEnforcementMessage);
             yield return BoolYesNoPluginVariable("2. Global Settings|Use AdKats for punishments?",
                 BoolUseAdKatsForPunishments);
 
             /* ===== 3. Weapon Enforcers ===== */
             yield return BoolYesNoPluginVariable("3. Weapon Enforcers|Create new Weapon Enforcer?",
-                _blnCreateNewWeaponEnforcer);
+                _boolCreateNewWeaponEnforcer);
             yield return IntPluginVariable("3. Weapon Enforcers|Weapon Enforcer deletion ID",
                 _intWeaponEnforcerDeletionId);
 
@@ -243,25 +242,25 @@ namespace PRoConEvents
                 {
                     /* ===== 1. Farming-Manager ===== */
                     case "Activate the plugin?":
-                        _blnIsPluginEnabled = bool.Parse(strValue);
+                        _boolIsPluginEnabled = bool.Parse(strValue);
                         break;
 
                     case "Check for plugin updates?":
-                        _blnDoPluginUpdateCheck = bool.Parse(strValue);
+                        _boolDoPluginUpdateCheck = bool.Parse(strValue);
                         break;
-                    
+
                     /* ===== 2. Global Settings ===== */
-                    case "Allow first enforcement message?":
-                        BoolAllowFirstEnforcementMessage = strValue == "Yes";
+                    case "Send initial enforcement message?":
+                        BoolSendInitialEnforcementMessage = strValue == "Yes";
                         break;
-                    
+
                     case "Use AdKats for punishments?":
                         BoolUseAdKatsForPunishments = strValue == "Yes";
                         break;
 
                     /* ===== 3. Weapon Enforcers ===== */
                     case "Create new Weapon Enforcer?":
-                        _blnCreateNewWeaponEnforcer = strValue == "Yes";
+                        _boolCreateNewWeaponEnforcer = strValue == "Yes";
                         break;
 
                     case "Weapon Enforcer deletion ID":
@@ -297,7 +296,7 @@ namespace PRoConEvents
                             (WeaponEnforcer.WeaponEnforcerState)Enum.Parse(typeof(WeaponEnforcer.WeaponEnforcerState),
                                 CPluginVariable.Decode(strValue));
                         break;
-                    
+
                     case "Select punishment type":
                         _dictWeaponEnforcersLookup[enforcerId].Punishment =
                             (WeaponEnforcer.PunishmentTypes)Enum.Parse(typeof(WeaponEnforcer.PunishmentTypes),
@@ -370,7 +369,7 @@ namespace PRoConEvents
         {
             Logger.Debug(() => "Received OnAccountLogin Event", 7);
 
-            if (_blnDoPluginUpdateCheck) CheckForPluginUpdate();
+            if (_boolDoPluginUpdateCheck) CheckForPluginUpdate();
 
             Logger.Debug(() => "Exiting OnAccountLogin Event", 7);
         }
@@ -379,7 +378,7 @@ namespace PRoConEvents
         {
             Logger.Debug(() => "Received OnServerInfo Event", 7);
 
-            if (_blnIsPluginEnabled) SaveCurrentWeaponEnforcers();
+            if (_boolIsPluginEnabled) SaveCurrentWeaponEnforcers();
 
             Logger.Debug(() => "Exiting OnServerInfo Event", 7);
         }
@@ -388,39 +387,44 @@ namespace PRoConEvents
         {
             Logger.Debug(() => "Received OnReservedSlotsList Event", 7);
 
-            if (_blnIsPluginEnabled) LstCurrentReservedSlotPlayers = soldierNames;
+            if (_boolIsPluginEnabled) LstCurrentReservedSlotPlayers = soldierNames;
 
             Logger.Debug(() => "Exiting OnReservedSlotsList Event", 7);
         }
 
         public override void OnPlayerKilled(Kill kKillerVictimDetails)
         {
-            Logger.Debug(() => "Received OnPlayerKilled Event", 7);
+            if (!_boolIsPluginEnabled) return;
 
-            if (!_blnIsPluginEnabled) return;
+            var damageType = kKillerVictimDetails.DamageType;
+            var killerSoldierName = kKillerVictimDetails.Killer.SoldierName;
+            var victimSoldierName = kKillerVictimDetails.Victim.SoldierName;
 
             // We don't want to count area or explosion damage nor collisions or suicides
-            if (kKillerVictimDetails.DamageType == "DamageArea" ||
-                kKillerVictimDetails.DamageType == "DamageExplosion" ||
-                kKillerVictimDetails.DamageType == "SoldierCollision" ||
-                kKillerVictimDetails.DamageType == "Suicide") return;
+            if (damageType == "DamageArea" ||
+                damageType == "DamageExplosion" ||
+                damageType == "SoldierCollision" ||
+                damageType == "Suicide" ||
+                killerSoldierName == victimSoldierName) return;
 
             //Make sure the player didn't crash or anything
             if (kKillerVictimDetails.Killer.SoldierName == string.Empty) return;
 
+            Logger.Debug(() => "Received OnPlayerKilled Event", 7);
+
             //Humanize the weapon name
-            var weaponName = GetDecodedWeaponName(kKillerVictimDetails.DamageType);
+            var weaponName = GetDecodedWeaponName(damageType);
 
             Logger.Debug(
                 () =>
-                    $"Player '{kKillerVictimDetails.Killer.SoldierName}' killed '{kKillerVictimDetails.Victim.SoldierName}' with '{weaponName}'",
+                    $"Player '{killerSoldierName}' killed '{victimSoldierName}' with '{weaponName}'",
                 4);
 
             // Find the first WeaponEnforcer that monitors the weapon used by the killer
             var weaponEnforcer =
                 _dictWeaponEnforcersLookup.Values.First(we => we.StrCurrentlyMonitoredWeapons.Contains(weaponName));
 
-            ThreadPool.QueueUserWorkItem(callback =>
+            ThreadPool.QueueUserWorkItem(callBack =>
             {
                 try
                 {
@@ -437,9 +441,9 @@ namespace PRoConEvents
 
         public override void OnPlayerLeft(CPlayerInfo playerInfo)
         {
-            Logger.Debug(() => "Received OnPlayerLeft Event", 7);
+            if (!_boolIsPluginEnabled) return;
 
-            if (!_blnIsPluginEnabled) return;
+            Logger.Debug(() => "Received OnPlayerLeft Event", 7);
 
             //Remove the player from the list of tracked players
             foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values)
@@ -450,9 +454,9 @@ namespace PRoConEvents
 
         public override void OnPlayerDisconnected(string soldierName, string reason)
         {
-            Logger.Debug(() => "Received OnPlayerDisconnected Event", 7);
+            if (!_boolIsPluginEnabled) return;
 
-            if (!_blnIsPluginEnabled) return;
+            Logger.Debug(() => "Received OnPlayerDisconnected Event", 7);
 
             //Remove the player from the list of tracked players
             foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values)
@@ -463,9 +467,9 @@ namespace PRoConEvents
 
         public override void OnRoundOver(int winningTeamId)
         {
-            Logger.Debug(() => "Received OnRoundOver Event", 7);
+            if (!_boolIsPluginEnabled) return;
 
-            if (!_blnIsPluginEnabled) return;
+            Logger.Debug(() => "Received OnRoundOver Event", 7);
 
             //Reset all tracked players
             foreach (var weaponEnforcer in _dictWeaponEnforcersLookup.Values) weaponEnforcer.ResetTrackedPlayers();
@@ -485,10 +489,10 @@ namespace PRoConEvents
                 {
                     /* ===== 2. Weapon Enforcers ===== */
                     case "Create new Weapon Enforcer?":
-                        if (_blnCreateNewWeaponEnforcer)
+                        if (_boolCreateNewWeaponEnforcer)
                         {
                             CreateNewWeaponEnforcer();
-                            _blnCreateNewWeaponEnforcer = false;
+                            _boolCreateNewWeaponEnforcer = false;
                         }
 
                         break;
@@ -604,7 +608,7 @@ namespace PRoConEvents
         public void DoAdKatsPunishment(string playerName, WeaponEnforcer.PunishmentTypes punishmentType, string reason)
         {
             Logger.Debug(() => "Starting up DoAdKatsPunishment", 7);
-            
+
             string commandType;
 
             switch (punishmentType)
@@ -612,23 +616,23 @@ namespace PRoConEvents
                 case WeaponEnforcer.PunishmentTypes.Punish:
                     commandType = "player_punish";
                     break;
-                
+
                 case WeaponEnforcer.PunishmentTypes.Kill:
                     commandType = "player_kill";
                     break;
-                
+
                 case WeaponEnforcer.PunishmentTypes.Kick:
                     commandType = "player_kick";
                     break;
-                
+
                 case WeaponEnforcer.PunishmentTypes.TempBan:
                     commandType = "player_ban_temp";
                     break;
-                
+
                 case WeaponEnforcer.PunishmentTypes.PermanentBan:
                     commandType = "player_ban";
                     break;
-                
+
                 default:
                     return;
             }
@@ -641,19 +645,20 @@ namespace PRoConEvents
 
                     var requestHashtable = new Hashtable
                     {
-                        {"caller_identity", GetType().Name},
-                        {"response_requested", false},
-                        {"command_type", commandType},
-                        {"source_name", GetType().Name},
-                        {"target_name", playerName},
-                        {"record_message", reason},
+                        { "caller_identity", GetType().Name },
+                        { "response_requested", false },
+                        { "command_type", commandType },
+                        { "source_name", GetType().Name },
+                        { "target_name", playerName },
+                        { "record_message", reason }
                     };
                     if (punishmentType == WeaponEnforcer.PunishmentTypes.TempBan)
                         requestHashtable.Add("command_numeric", 60);
-                    
-                    ExecuteCommand("procon.protected.plugins.call", "AdKats", "IssueCommand", GetType().Name, JSON.JsonEncode(requestHashtable));
-                    
-                    Logger.Debug(() => $"Issued AdKats punishment to {playerName} for {reason}", 2);
+
+                    ExecuteCommand("procon.protected.plugins.call", "AdKats", "IssueCommand", GetType().Name,
+                        JSON.JsonEncode(requestHashtable));
+
+                    Logger.Debug(() => $"Issued AdKats punishment to {playerName} for {reason}", 3);
                 }
                 catch (Exception e)
                 {
@@ -663,9 +668,10 @@ namespace PRoConEvents
 
             Logger.Debug(() => "Exiting DoAdKatsPunishment", 7);
         }
-        
+
         public void DoPRoConPunishment(string playerName, WeaponEnforcer.PunishmentTypes punishmentType, string reason)
-        { }
+        {
+        }
 
         #endregion
 
@@ -925,29 +931,28 @@ namespace PRoConEvents
 
         public void ProcessWeaponKill(Kill kKillerVictimDetails)
         {
-            _plugin.Logger.Debug(() => $"Starting up ProcessWeaponKill for Enforcer #{_strEnforcerId}", 7);
-            
             if (EnforcerState == WeaponEnforcerState.Disabled) return;
-            
+
             if (!CurrentTimeWithinAllowedTimeFrameCheck()) return;
-            
+
+            _plugin.Logger.Debug(() => $"Starting up ProcessWeaponKill for Enforcer #{_strEnforcerId}", 7);
+
             var soldierName = kKillerVictimDetails.Killer.SoldierName;
             var playerWeapon = _plugin.GetDecodedWeaponName(kKillerVictimDetails.DamageType);
 
             if (EnforcerState != WeaponEnforcerState.Virtual)
-            {
                 switch (true)
                 {
                     //Soldier hasn't been tracked yet so we need to start the initial check
                     case true when !_dictTrackedPlayers.ContainsKey(kKillerVictimDetails.Killer.SoldierName):
                         StartInitialCheck(soldierName, playerWeapon);
                         break;
-                
+
                     //Soldier has been tracked but the weapon they're using hasn't been tracked yet
                     case true when !_dictTrackedPlayers[soldierName].Any(x => x.ContainsKey(playerWeapon)):
                         AddTrackedWeaponToSoldier(soldierName, playerWeapon);
                         break;
-                
+
                     //Soldier has been tracked and the weapon they're using has been tracked
                     //So we just need to increment the weapon's usage count
                     //Lastly go through the tracked player again and check if they exceeded some limit
@@ -956,9 +961,10 @@ namespace PRoConEvents
                         LastCheckUpOnPlayer(kKillerVictimDetails.Killer, playerWeapon);
                         break;
                 }
-            }
-            else _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing ProcessWeaponKill for '{soldierName}'");
-            
+            else
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing ProcessWeaponKill for '{soldierName}'");
+
             _plugin.Logger.Debug(() => $"Exiting ProcessWeaponKill for Enforcer #{_strEnforcerId}", 7);
         }
 
@@ -982,12 +988,12 @@ namespace PRoConEvents
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
                 AddFirstTrackingEntry(soldierName, playerWeapon);
-                
+
                 if (BoolLogToPRoConChat)
                     _plugin.LogToPRoConChat(
                         $"Enforcer #{_strEnforcerId}: Now monitoring '{soldierName}' for weapon '{playerWeapon}'");
 
-                if (_plugin.BoolAllowFirstEnforcementMessage)
+                if (_plugin.BoolSendInitialEnforcementMessage)
                     _plugin.SendPlayerTell(soldierName,
                         $"You are now being monitored by Enforcer #{_strEnforcerId} for weapon {playerWeapon}", 10);
 
@@ -998,7 +1004,8 @@ namespace PRoConEvents
             }
             else
             {
-                _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing InitialCheck for '{soldierName}'");
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing InitialCheck for '{soldierName}'");
             }
 
             _plugin.Logger.Debug(() => "Exiting StartInitialCheck", 7);
@@ -1018,7 +1025,7 @@ namespace PRoConEvents
                 if (BoolLogToPRoConChat)
                     _plugin.LogToPRoConChat(
                         $"Enforcer #{_strEnforcerId}: Added weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'");
-                
+
                 _plugin.Logger.Debug(
                     () =>
                         $"Enforcer #{_strEnforcerId}: Added weapon '{playerWeapon}' to tracked weapons for player '{soldierName}'",
@@ -1026,12 +1033,13 @@ namespace PRoConEvents
             }
             else
             {
-                _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing AddTrackedWeaponToSoldier for '{soldierName}'");
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing AddTrackedWeaponToSoldier for '{soldierName}'");
             }
 
             _plugin.Logger.Debug(() => "Exiting AddTrackedWeaponToSoldier", 7);
         }
-        
+
         private void IncrementCountOnTrackedWeapon(string soldierName, string playerWeapon)
         {
             _plugin.Logger.Debug(() => "Starting up IncrementCountOnTrackedWeapon", 7);
@@ -1040,7 +1048,9 @@ namespace PRoConEvents
             var weaponUsageCount =
                 _dictTrackedPlayers[soldierName].First(x => x.ContainsKey(playerWeapon))[playerWeapon];
             _plugin.Logger.Debug(
-                () => $"Enforcer #{_strEnforcerId}: Counted up on {soldierName} with {playerWeapon} to {weaponUsageCount}", 3);
+                () =>
+                    $"Enforcer #{_strEnforcerId}: Counted up on {soldierName} with {playerWeapon} to {weaponUsageCount}",
+                3);
 
             _plugin.Logger.Debug(() => "Exiting IncrementCountOnTrackedWeapon", 7);
         }
@@ -1062,22 +1072,22 @@ namespace PRoConEvents
                 case true when weaponUsageCount == minRequiredKills25Percent:
                     DoPercentNotification(player.SoldierName, weapon, "25%");
                     return;
-                
+
                 //Notify the player once they reach 50% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills25Percent * 2:
                     DoPercentNotification(player.SoldierName, weapon, "50%");
                     return;
-                
+
                 //Notify the player once they reach 75% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills25Percent * 3:
                     DoPercentNotification(player.SoldierName, weapon, "75%");
                     return;
-                
+
                 //Notify the player once they reach 100% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills:
                     DoPercentNotification(player.SoldierName, weapon, "100%");
                     return;
-                
+
                 //At this point the player is beyond the minimum required kills
                 case true when weaponUsageCount > minRequiredKills:
                     HandleEnforcementPunishment(player, weapon);
@@ -1090,9 +1100,9 @@ namespace PRoConEvents
         private void HandleEnforcementPunishment(CPlayerInfo player, string weapon)
         {
             _plugin.Logger.Debug(() => "Starting up HandleEnforcementPunishment", 7);
-            
+
             var maximumWarnings = GetMaximumWarningsForPlayer(player.SoldierName);
-            
+
             AddOrIncrementPlayerWarnings(player.SoldierName);
 
             var currentWarnings = _dictTotalPlayerWarnings[player.SoldierName];
@@ -1105,19 +1115,23 @@ namespace PRoConEvents
             switch (true)
             {
                 case true when currentWarnings == 1 && playerKdr >= maxAllowedKdr:
-                    infoMessage = $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | This is the first warning!";
+                    infoMessage =
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | This is the first warning!";
                     break;
-                
-                case true when currentWarnings < maximumWarnings -1 && playerKdr >= maxAllowedKdr:
-                    infoMessage = $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | Warning [{currentWarnings}/{maximumWarnings}]";
+
+                case true when currentWarnings < maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
+                    infoMessage =
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | Warning [{currentWarnings}/{maximumWarnings}]";
                     break;
-                
-                case true when currentWarnings == maximumWarnings -3 && playerKdr >= maxAllowedKdr:
-                    infoMessage = $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] Please change your play-style or use a different weapon | Warning [{currentWarnings}/{maximumWarnings}]";
+
+                case true when currentWarnings == maximumWarnings - 3 && playerKdr >= maxAllowedKdr:
+                    infoMessage =
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] Please change your play-style or use a different weapon | Warning [{currentWarnings}/{maximumWarnings}]";
                     break;
-                
-                case true when currentWarnings == maximumWarnings -1 && playerKdr >= maxAllowedKdr:
-                    infoMessage = $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
+
+                case true when currentWarnings == maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
+                    infoMessage =
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
                     break;
 
                 //When we're here just punish em
@@ -1133,7 +1147,8 @@ namespace PRoConEvents
             }
             else
             {
-                _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing HandleEnforcementPunishment for '{player.SoldierName}'");
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing HandleEnforcementPunishment for '{player.SoldierName}'");
             }
 
             _plugin.Logger.Debug(() => "Exiting HandleEnforcementPunishment", 7);
@@ -1142,21 +1157,18 @@ namespace PRoConEvents
         private void InitializePunishment(CPlayerInfo player, string reason)
         {
             _plugin.Logger.Debug(() => "Starting up InitializePunishment", 7);
-            
+
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
                 if (_plugin.BoolUseAdKatsForPunishments)
-                {
                     _plugin.DoAdKatsPunishment(player.SoldierName, Punishment, reason);
-                }
                 else
-                {
                     _plugin.DoPRoConPunishment(player.SoldierName, Punishment, reason);
-                }
             }
             else
             {
-                _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing InitializePunishment for '{player.SoldierName}'");
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing InitializePunishment for '{player.SoldierName}'");
             }
 
             _plugin.Logger.Debug(() => "Exiting InitializePunishment", 7);
@@ -1167,30 +1179,30 @@ namespace PRoConEvents
             var minRequiredKills = GetMinimumRequiredKillsForPlayer(soldierName);
             var weaponUsageCount = _dictTrackedPlayers[soldierName]
                 .First(x => x.ContainsKey(playerWeapon))[playerWeapon];
-            
+
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
-                var message = $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}]] of minimum required kills for weapon {playerWeapon} to be tracked";
-                
+                var message =
+                    $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}]] of minimum required kills for weapon {playerWeapon} to be tracked";
+
                 if (BoolLogToPRoConChat)
                     _plugin.LogToPRoConChat(
                         $"Enforcer #{_strEnforcerId}: Sent {percent} [{weaponUsageCount}/{minRequiredKills}]] warning message to {soldierName} for weapon {playerWeapon}");
 
                 if (percent == "100%")
-                {
                     message =
                         $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
-                }
-                    
+
                 _plugin.SendPlayerYell(soldierName, message, 10);
                 _plugin.SendPlayerMessage(soldierName, message);
             }
             else
             {
-                _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing DoPercentNotification for '{soldierName}'");
+                _plugin.Logger.Warn(
+                    $"Enforcer #{_strEnforcerId}: Currently in virtual mode, not executing DoPercentNotification for '{soldierName}'");
             }
         }
-        
+
 
         private void AddFirstTrackingEntry(string soldierName, string playerWeapon)
         {
@@ -1217,12 +1229,14 @@ namespace PRoConEvents
             {
                 case true when _dictTrackedPlayers.ContainsKey(soldierName):
                     _dictTrackedPlayers.Remove(soldierName);
-                    _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from tracked players", 3);
+                    _plugin.Logger.Debug(
+                        () => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from tracked players", 3);
                     break;
-                
+
                 case true when _dictTotalPlayerWarnings.ContainsKey(soldierName):
                     _dictTotalPlayerWarnings.Remove(soldierName);
-                    _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from total warnings", 3);
+                    _plugin.Logger.Debug(
+                        () => $"Enforcer #{_strEnforcerId}: Removed player '{soldierName}' from total warnings", 3);
                     break;
             }
 
@@ -1260,39 +1274,44 @@ namespace PRoConEvents
 
             _plugin.Logger.Debug(() => "Exiting AddOrIncrementPlayerWarnings", 7);
         }
-        
+
         private int GetMinimumRequiredKillsForPlayer(string soldierName)
         {
             _plugin.Logger.Debug(() => "Starting up GetMinimumRequiredKillsForPlayer", 7);
-            
+
             var minRequiredKills = IntMinRequiredKills;
             if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
                 _plugin.LstCurrentReservedSlotPlayers.Contains(soldierName))
                 minRequiredKills = IntMinRequiredKillsForReservedSlotPlayers;
-            
-            _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Minimum required kills for player '{soldierName}' are {minRequiredKills}", 3);
-            
+
+            _plugin.Logger.Debug(
+                () =>
+                    $"Enforcer #{_strEnforcerId}: Minimum required kills for player '{soldierName}' are {minRequiredKills}",
+                3);
+
             _plugin.Logger.Debug(() => "Exiting GetMinimumRequiredKillsForPlayer", 7);
-            
+
             return minRequiredKills;
         }
 
         private int GetMaximumWarningsForPlayer(string soldierName)
         {
             _plugin.Logger.Debug(() => "Starting up GetMaximumWarningsForPlayer", 7);
-            
+
             var maximumWarnings = IntMaximumWarnings;
             if (BoolAllowHigherTotalKillsForReservedSlotPlayers &&
                 _plugin.LstCurrentReservedSlotPlayers.Contains(soldierName))
                 maximumWarnings = IntMaximumWarningsReservedSlotPlayers;
-            
-            _plugin.Logger.Debug(() => $"Enforcer #{_strEnforcerId}: Maximum warnings for player '{soldierName}' are {maximumWarnings}", 3);
+
+            _plugin.Logger.Debug(
+                () => $"Enforcer #{_strEnforcerId}: Maximum warnings for player '{soldierName}' are {maximumWarnings}",
+                3);
 
             _plugin.Logger.Debug(() => "Exiting GetMaximumWarningsForPlayer", 7);
-            
+
             return maximumWarnings;
         }
-        
+
         private string GetFullName()
         {
             return $"4.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
