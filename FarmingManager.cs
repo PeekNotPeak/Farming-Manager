@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.5.2";
+        private const string StrPluginVersion = "0.5.3";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
 
@@ -305,6 +305,10 @@ namespace PRoConEvents
 
                     case "Log to PRoCon Chat?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolLogToPRoConChat = strValue == "Yes";
+                        break;
+                    
+                    case "Send 70% and 90% warning messages?":
+                        _dictWeaponEnforcersLookup[enforcerId].BoolSendPercentWarningMessages = strValue == "Yes";
                         break;
 
                     case "Select monitored weapon":
@@ -823,6 +827,7 @@ namespace PRoConEvents
         public WeaponEnforcerState EnforcerState;
         public PunishmentTypes Punishment;
         public bool BoolLogToPRoConChat;
+        public bool BoolSendPercentWarningMessages;
         public string[] StrCurrentlyMonitoredWeapons;
         public bool BoolPersistTrackedPlayersThroughRounds;
         public int IntMinRequiredKills;
@@ -843,6 +848,7 @@ namespace PRoConEvents
 
             EnforcerState = WeaponEnforcerState.Disabled;
             BoolLogToPRoConChat = true;
+            BoolSendPercentWarningMessages = true;
             StrCurrentlyMonitoredWeapons = new[]
                 { "AH-1Z Viper Attack Helicopter", "Type 99 MBT", "M1 Abrams MBT", "LAV-25 APC" };
             BoolPersistTrackedPlayersThroughRounds = true;
@@ -900,6 +906,8 @@ namespace PRoConEvents
                     FarmingManagerUtilities.CreateEnumString<PunishmentTypes>(), Punishment.ToString()),
                 BoolYesNoPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Log to PRoCon Chat?",
                     BoolLogToPRoConChat),
+                BoolYesNoPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Send 70% and 90% warning messages?",
+                    BoolSendPercentWarningMessages),
                 StringArrayPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Select monitored weapon",
                     StrCurrentlyMonitoredWeapons),
                 BoolYesNoPluginVariable(
@@ -1064,25 +1072,21 @@ namespace PRoConEvents
                 .First(x => x.ContainsKey(weapon))[weapon];
 
             //Compute the 25% of the minimum required kills and cast it to int
-            var minRequiredKills25Percent = (int)Math.Round(minRequiredKills * 0.25);
+            var minRequiredKills70Percent = (int)Math.Round(minRequiredKills * 0.70);
+            var minRequiredKills90Percent = (int)Math.Round(minRequiredKills * 0.90);
 
             switch (true)
             {
-                //Notify the player once they reach 25% of the minimum required kills with the specific weapon
-                case true when weaponUsageCount == minRequiredKills25Percent:
-                    DoPercentNotification(player.SoldierName, weapon, "25%");
+                //Notify the player once they reach 70% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills70Percent:
+                    DoPercentNotification(player.SoldierName, weapon, "70%");
                     return;
 
-                //Notify the player once they reach 50% of the minimum required kills with the specific weapon
-                case true when weaponUsageCount == minRequiredKills25Percent * 2:
-                    DoPercentNotification(player.SoldierName, weapon, "50%");
+                //Notify the player once they reach 90% of the minimum required kills with the specific weapon
+                case true when weaponUsageCount == minRequiredKills90Percent:
+                    DoPercentNotification(player.SoldierName, weapon, "90%");
                     return;
-
-                //Notify the player once they reach 75% of the minimum required kills with the specific weapon
-                case true when weaponUsageCount == minRequiredKills25Percent * 3:
-                    DoPercentNotification(player.SoldierName, weapon, "75%");
-                    return;
-
+                
                 //Notify the player once they reach 100% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills:
                     DoPercentNotification(player.SoldierName, weapon, "100%");
@@ -1121,17 +1125,21 @@ namespace PRoConEvents
 
                 case true when currentWarnings < maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
-                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | Warning [{currentWarnings}/{maximumWarnings}]";
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | " +
+                        $"Warning [{currentWarnings}/{maximumWarnings}]";
                     break;
 
                 case true when currentWarnings == maximumWarnings - 3 && playerKdr >= maxAllowedKdr:
                     infoMessage =
-                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] Please change your play-style or use a different weapon | Warning [{currentWarnings}/{maximumWarnings}]";
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] " +
+                        "Please change your play-style or use a different weapon | " +
+                        $"Warning [{currentWarnings}/{maximumWarnings}]";
                     break;
 
                 case true when currentWarnings == maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
-                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
+                        $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | " +
+                        $"THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
                     break;
 
                 //When we're here just punish em
@@ -1144,6 +1152,12 @@ namespace PRoConEvents
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
                 if (infoMessage != string.Empty) _plugin.SendPlayerTell(player.SoldierName, infoMessage, 15);
+
+                if (BoolLogToPRoConChat)
+                {
+                    var message = player.SoldierName + " > " + infoMessage;
+                    _plugin.LogToPRoConChat(message);
+                }
             }
             else
             {
@@ -1182,19 +1196,29 @@ namespace PRoConEvents
 
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
-                var message =
-                    $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}]] of minimum required kills for weapon {playerWeapon} to be tracked";
+                if (BoolSendPercentWarningMessages)
+                {
+                    var message =
+                        $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}] of minimum required kills for weapon {playerWeapon} to be punished";
 
-                if (BoolLogToPRoConChat)
-                    _plugin.LogToPRoConChat(
-                        $"Enforcer #{_strEnforcerId}: Sent {percent} [{weaponUsageCount}/{minRequiredKills}]] warning message to {soldierName} for weapon {playerWeapon}");
+                    if (percent == "100%")
+                        message =
+                            $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
 
-                if (percent == "100%")
-                    message =
-                        $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
-
-                _plugin.SendPlayerYell(soldierName, message, 10);
-                _plugin.SendPlayerMessage(soldierName, message);
+                
+                    _plugin.SendPlayerYell(soldierName, message, 10);
+                    _plugin.SendPlayerMessage(soldierName, message);
+                
+                    if (BoolLogToPRoConChat)
+                        _plugin.LogToPRoConChat(
+                            $"Enforcer #{_strEnforcerId}: Sent {percent} [{weaponUsageCount}/{minRequiredKills}] " +
+                            $"warning message to '{soldierName}' for weapon '{playerWeapon}'");
+                }
+                else
+                {
+                    _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: BoolSendPercentWarningMessages is turned off. " +
+                                        $"Player '{soldierName}' will not receive {percent} warnings.");
+                }
             }
             else
             {
