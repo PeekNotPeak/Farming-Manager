@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.5.3";
+        private const string StrPluginVersion = "0.6.0";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
 
@@ -306,7 +306,7 @@ namespace PRoConEvents
                     case "Log to PRoCon Chat?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolLogToPRoConChat = strValue == "Yes";
                         break;
-                    
+
                     case "Send 70% and 90% warning messages?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolSendPercentWarningMessages = strValue == "Yes";
                         break;
@@ -513,7 +513,11 @@ namespace PRoConEvents
                             Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
                             Logger.IntDebugLevel = 0;
                         }
-                        else { Logger.IntDebugLevel = int.Parse(strValue); }
+                        else
+                        {
+                            Logger.IntDebugLevel = int.Parse(strValue);
+                        }
+
                         break;
                 }
             }
@@ -645,7 +649,7 @@ namespace PRoConEvents
             {
                 try
                 {
-                    Thread.Sleep(500);
+                    Thread.Sleep(2000);
 
                     var requestHashtable = new Hashtable
                     {
@@ -657,12 +661,14 @@ namespace PRoConEvents
                         { "record_message", reason }
                     };
                     if (punishmentType == WeaponEnforcer.PunishmentTypes.TempBan)
-                        requestHashtable.Add("command_numeric", 60);
+                        requestHashtable.Add("command_numeric", 60); //1 hour or 60 minutes
 
                     ExecuteCommand("procon.protected.plugins.call", "AdKats", "IssueCommand", GetType().Name,
                         JSON.JsonEncode(requestHashtable));
 
-                    Logger.Debug(() => $"Issued AdKats punishment to {playerName} for {reason}", 3);
+                    Logger.Debug(
+                        () => $"Issued AdKats punishment [{punishmentType.ToString()}] to {playerName} for: {reason}",
+                        3);
                 }
                 catch (Exception e)
                 {
@@ -675,6 +681,71 @@ namespace PRoConEvents
 
         public void DoPRoConPunishment(string playerName, WeaponEnforcer.PunishmentTypes punishmentType, string reason)
         {
+            string commandType;
+
+            switch (punishmentType)
+            {
+                case WeaponEnforcer.PunishmentTypes.Punish:
+                    commandType = "admin.punishPlayer";
+                    break;
+
+                case WeaponEnforcer.PunishmentTypes.Kill:
+                    commandType = "admin.killPlayer";
+                    break;
+
+                case WeaponEnforcer.PunishmentTypes.Kick:
+                    commandType = "admin.kickPlayer";
+                    break;
+
+                case WeaponEnforcer.PunishmentTypes.TempBan:
+                    commandType = "admin.tempBanPlayer";
+                    break;
+
+                case WeaponEnforcer.PunishmentTypes.PermanentBan:
+                    commandType = "admin.banPlayer";
+                    break;
+
+                default:
+                    return;
+            }
+
+            ThreadPool.QueueUserWorkItem(callBack =>
+            {
+                try
+                {
+                    Thread.Sleep(2000); //3 Seconds
+
+                    if (punishmentType != WeaponEnforcer.PunishmentTypes.Punish ||
+                        punishmentType != WeaponEnforcer.PunishmentTypes.TempBan ||
+                        punishmentType != WeaponEnforcer.PunishmentTypes.PermanentBan)
+                    {
+                        ExecuteCommand("procon.protected.send", commandType, playerName, reason);
+                    }
+                    else
+                    {
+                        const int time = 60 * 60; //1 Hour or 60 minutes in seconds
+
+                        //Add the player to the ban list either with a time or permanent
+                        if (commandType == "admin.tempBanPlayer")
+                            ExecuteCommand("procon.protected.send", "banList.add", "name", playerName, "seconds",
+                                time.ToString(CultureInfo.InvariantCulture), reason);
+                        else
+                            ExecuteCommand("procon.protected.send", "banList.add", "name", playerName, "perm", reason);
+
+                        //Save the ban list and kick him
+                        ExecuteCommand("procon.protected.send", "banList.save");
+                        ExecuteCommand("procon.protected.send", "admin.KickPlayer", playerName, reason);
+                    }
+
+                    Logger.Debug(
+                        () => $"Issued PRoCon punishment [{punishmentType.ToString()}] to {playerName} for: {reason}",
+                        3);
+                }
+                catch (Exception e)
+                {
+                    Logger.Exception(e);
+                }
+            });
         }
 
         #endregion
@@ -1086,7 +1157,7 @@ namespace PRoConEvents
                 case true when weaponUsageCount == minRequiredKills90Percent:
                     DoPercentNotification(player.SoldierName, weapon, "90%");
                     return;
-                
+
                 //Notify the player once they reach 100% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills:
                     DoPercentNotification(player.SoldierName, weapon, "100%");
@@ -1111,10 +1182,10 @@ namespace PRoConEvents
 
             var currentWarnings = _dictTotalPlayerWarnings[player.SoldierName];
 
-            var infoMessage = string.Empty;
-
             var playerKdr = Math.Round(player.Kdr, 2);
             var maxAllowedKdr = Math.Round(DoubleMaxAllowedKdr, 2);
+
+            var infoMessage = string.Empty;
 
             switch (true)
             {
@@ -1139,12 +1210,12 @@ namespace PRoConEvents
                 case true when currentWarnings == maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
                         $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | " +
-                        $"THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
+                        "THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
                     break;
 
                 //When we're here just punish em
-                case true when currentWarnings == maximumWarnings && playerKdr >= maxAllowedKdr:
-                    var reason = $"Your current KDR with {weapon} is too high [{playerKdr}/{maxAllowedKdr}]";
+                case true when currentWarnings >= maximumWarnings && playerKdr >= maxAllowedKdr:
+                    var reason = infoMessage = $"Exceeded KDR Limit with '{weapon}' [{playerKdr}/{maxAllowedKdr}]";
                     InitializePunishment(player, reason);
                     break;
             }
@@ -1155,7 +1226,7 @@ namespace PRoConEvents
 
                 if (BoolLogToPRoConChat)
                 {
-                    var message = player.SoldierName + " > " + infoMessage;
+                    var message = $"Enforcer #{_strEnforcerId}:" + player.SoldierName + " > " + infoMessage;
                     _plugin.LogToPRoConChat(message);
                 }
             }
@@ -1178,6 +1249,10 @@ namespace PRoConEvents
                     _plugin.DoAdKatsPunishment(player.SoldierName, Punishment, reason);
                 else
                     _plugin.DoPRoConPunishment(player.SoldierName, Punishment, reason);
+
+                if (BoolLogToPRoConChat)
+                    _plugin.LogToPRoConChat(
+                        $"Enforcer #{_strEnforcerId}: Issued punishment [{Punishment.ToString()}] to {player.SoldierName} for: {reason}");
             }
             else
             {
@@ -1205,10 +1280,10 @@ namespace PRoConEvents
                         message =
                             $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
 
-                
+
                     _plugin.SendPlayerYell(soldierName, message, 10);
                     _plugin.SendPlayerMessage(soldierName, message);
-                
+
                     if (BoolLogToPRoConChat)
                         _plugin.LogToPRoConChat(
                             $"Enforcer #{_strEnforcerId}: Sent {percent} [{weaponUsageCount}/{minRequiredKills}] " +
