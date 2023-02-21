@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.2";
+        private const string StrPluginVersion = "0.6.3";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         public List<string> LstCurrentReservedSlotPlayers;
@@ -849,38 +849,69 @@ namespace PRoConEvents
             });
         }
 
-        public void DoDiscordNotification(string enforcerId, CPlayerInfo player, WeaponEnforcer.PunishmentTypes punishmentType, string reason)
+        public void DoDiscordNotification(string enforcerId, CPlayerInfo player,
+            WeaponEnforcer.PunishmentTypes punishmentType, string reason)
         {
-            var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
-                _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
-
-            var title = GetPluginName() + " - Report";
-            var content = string.Empty;
-
-            foreach (var line in _strArrayDiscordWebhookContent)
+            try
             {
-                content += line.Replace("%targetName", player.SoldierName)
-                    .Replace("%enforcerId", enforcerId)
-                    .Replace("%punishmentType", punishmentType.ToString())
-                    .Replace("%punishmentReason", reason)
-                    .Replace("%serverName", _csiServerInfo.ServerName)
-                    .Replace("%mapName", _csiServerInfo.Map)
-                    .Replace("%gameMode", _csiServerInfo.GameMode);
-                content += Environment.NewLine;
-            }
+                var discordWebhookThread = new Thread(() =>
+                {
+                    var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
+                        _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
+
+                    var title = GetPluginName() + " - Report";
+                    var content = string.Empty;
+
+                    foreach (var line in _strArrayDiscordWebhookContent)
+                    {
+                        content += line.Replace("%targetName%", player.SoldierName)
+                            .Replace("%enforcerId%", enforcerId)
+                            .Replace("%punishmentType%", punishmentType.ToString())
+                            .Replace("%punishmentReason%", reason)
+                            .Replace("%serverName%", _csiServerInfo.ServerName)
+                            .Replace("%mapName%", _csiServerInfo.Map)
+                            .Replace("%gameMode%", _csiServerInfo.GameMode);
+                        content += Environment.NewLine;
+                    }
             
-            webhook.SendNotification(title, content);
+                    webhook.SendNotification(title, content);
+                })
+                {
+                    Name = "DiscordWebhookThread",
+                    IsBackground = true
+                };
+                discordWebhookThread.Start();
+            }
+            catch (Exception e)
+            {
+                Logger.Exception(e);
+            }
         }
 
         private void DoDiscordTestNotification()
         {
-            var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
-                _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
+            try
+            {
+                var discordWebhookThread = new Thread(() =>
+                {
+                    var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
+                        _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
             
-            const string content = "This is just a test to make sure you successfully set up your Discord Webhook.\n" +
-                                   "Let the monitoring of farming players begin! :)";
+                    const string content = "This is just a test to make sure you successfully set up your Discord Webhook.\n" +
+                                           "Let the monitoring of farming players begin! :)";
             
-            webhook.SendNotification(GetPluginName() + " - Test Notification", content);
+                    webhook.SendNotification(GetPluginName() + " - Test Notification", content);
+                })
+                {
+                    Name = "TestDiscordWebhookThread",
+                    IsBackground = true
+                };
+                discordWebhookThread.Start();
+            }
+            catch (Exception e)
+            {
+                Logger.Exception(e);
+            }
         }
 
         #endregion
