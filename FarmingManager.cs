@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.0";
+        private const string StrPluginVersion = "0.6.1";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
 
@@ -491,7 +491,23 @@ namespace PRoConEvents
             {
                 switch (strVariable)
                 {
-                    /* ===== 2. Weapon Enforcers ===== */
+                    /* ===== 2. Global Settings ===== */
+                    case "Use AdKats for punishments?":
+                        var adKatsFound = GetRegisteredCommands().Any(command =>
+                            command.RegisteredClassname == "AdKats" && command.RegisteredMethodName == "PluginEnabled");
+                        if (!adKatsFound)
+                        {
+                            BoolUseAdKatsForPunishments = false;
+                            Logger.Warn("AdKats not found. Cannot use AdKats for punishments.");
+                        }
+                        else
+                        {
+                            BoolUseAdKatsForPunishments = strValue == "Yes";
+                        }
+
+                        break;
+
+                    /* ===== 3. Weapon Enforcers ===== */
                     case "Create new Weapon Enforcer?":
                         if (_boolCreateNewWeaponEnforcer)
                         {
@@ -510,8 +526,8 @@ namespace PRoConEvents
                     case "Debug level":
                         if (int.Parse(strValue) < 0 || int.Parse(strValue) > 10)
                         {
-                            Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
                             Logger.IntDebugLevel = 0;
+                            Logger.Warn($"Debug level must be between 0 and 10. Value '{strValue}' is invalid.");
                         }
                         else
                         {
