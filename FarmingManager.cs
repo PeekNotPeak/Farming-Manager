@@ -24,31 +24,38 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.1";
+        private const string StrPluginVersion = "0.6.2";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
+        public List<string> LstCurrentReservedSlotPlayers;
+        private CServerInfo _csiServerInfo;
 
         /* ===== 1. Farming-Manager ===== */
         private bool _boolIsPluginEnabled;
         private bool _boolDoPluginUpdateCheck;
-
         private const string StrPluginUpdateUrl =
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
-
-        public List<string> LstCurrentReservedSlotPlayers;
 
         /* ===== 2. Global Settings ===== */
         public bool BoolSendInitialEnforcementMessage;
         public bool BoolUseAdKatsForPunishments;
+        private bool _boolDoDiscordNotification;
+        
+        /* ===== 3. Discord Settings ===== */
+        private string _strDiscordWebhookUrl;
+        private string _strDiscordWebhookUsername;
+        private string _strDiscordWebhookAvatarUrl;
+        private int _intDiscordWebhookEmbedColour;
+        private string[] _strArrayDiscordWebhookContent;
+        
+        private bool _boolTestDiscordWebhook;
 
-        /* ===== 3. Weapon Enforcers ===== */
+        /* ===== 4. Weapon Enforcers ===== */
         private readonly Dictionary<string, WeaponEnforcer> _dictWeaponEnforcersLookup;
         private bool _boolCreateNewWeaponEnforcer;
         private int _intWeaponEnforcerDeletionId;
         private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
-
         private Hashtable _hshTblHumanWeaponNames;
-
         private const string StrHumanWeaponNamesUrl =
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/weapon_names.json";
 
@@ -61,15 +68,36 @@ namespace PRoConEvents
 
         public FarmingManager()
         {
+            /* ===== Miscellaneous ===== */
+            LstCurrentReservedSlotPlayers = new List<string>();
+            _csiServerInfo = null;
+            
             /* ===== 1. FarmingManager ===== */
             _boolIsPluginEnabled = false;
-            LstCurrentReservedSlotPlayers = new List<string>();
-
+            
             /* ===== 2. Global Settings ===== */
             BoolSendInitialEnforcementMessage = true;
             BoolUseAdKatsForPunishments = false;
-
-            /* ===== 3. Weapon Enforcers ===== */
+            _boolDoDiscordNotification = false;
+            
+            /* ===== 3. Discord Settings ===== */
+            _strDiscordWebhookUrl = "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks";
+            _strDiscordWebhookUsername = GetPluginName();
+            _strDiscordWebhookAvatarUrl = "https://avatarfiles.alphacoders.com/194/194134.jpg";
+            _intDiscordWebhookEmbedColour = 1160054;
+            _strArrayDiscordWebhookContent = new[]
+            {
+                "> Target: %targetName%",
+                "> Enforcer: %enforcerId%",
+                "> Punishment: %punishmentType%",
+                "> Reason: %punishmentReason%",
+                "> **Server:** %serverName%",
+                "> **Current Map:** %mapName%",
+                "> **Current Game-mode: **%gameMode%",
+            };
+            _boolTestDiscordWebhook = false;
+            
+            /* ===== 4. Weapon Enforcers ===== */
             _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
             _boolCreateNewWeaponEnforcer = false;
             _intWeaponEnforcerDeletionId = 0;
@@ -215,11 +243,25 @@ namespace PRoConEvents
                 BoolSendInitialEnforcementMessage);
             yield return BoolYesNoPluginVariable("2. Global Settings|Use AdKats for punishments?",
                 BoolUseAdKatsForPunishments);
+            yield return BoolYesNoPluginVariable("2. Global Settings|Send Discord notifications?",
+                _boolDoDiscordNotification);
+            
+            /* ===== 3. Discord Settings ===== */
+            if (_boolDoDiscordNotification)
+            {
+                yield return StringPluginVariable("3. Discord Settings|Webhook URL", _strDiscordWebhookUrl);
+                yield return StringArrayPluginVariable("3. Discord Settings|Webhook Content", _strArrayDiscordWebhookContent);
+                yield return StringPluginVariable("3. Discord Settings|Webhook Username", _strDiscordWebhookUsername);
+                yield return StringPluginVariable("3. Discord Settings|Webhook Avatar URL", _strDiscordWebhookAvatarUrl);
+                yield return IntPluginVariable("3. Discord Settings|Embed Colour", _intDiscordWebhookEmbedColour);
+                yield return BoolYesNoPluginVariable("3. Discord Settings|Test Webhook Notification?",
+                    _boolTestDiscordWebhook);
+            }
 
-            /* ===== 3. Weapon Enforcers ===== */
-            yield return BoolYesNoPluginVariable("3. Weapon Enforcers|Create new Weapon Enforcer?",
+            /* ===== 4. Weapon Enforcers ===== */
+            yield return BoolYesNoPluginVariable("4. Weapon Enforcers|Create new Weapon Enforcer?",
                 _boolCreateNewWeaponEnforcer);
-            yield return IntPluginVariable("3. Weapon Enforcers|Weapon Enforcer deletion ID",
+            yield return IntPluginVariable("4. Weapon Enforcers|Weapon Enforcer deletion ID",
                 _intWeaponEnforcerDeletionId);
 
             /* ===== 4.x Weapon Enforcers ===== */
@@ -257,8 +299,37 @@ namespace PRoConEvents
                     case "Use AdKats for punishments?":
                         BoolUseAdKatsForPunishments = strValue == "Yes";
                         break;
+                    
+                    case "Send Discord notifications?":
+                        _boolDoDiscordNotification = strValue == "Yes";
+                        break;
+                    
+                    /* ===== 3. Discord Settings ===== */
+                    case "Webhook URL":
+                        _strDiscordWebhookUrl = strValue;
+                        break;
+                    
+                    case "Webhook Content":
+                        _strArrayDiscordWebhookContent = CPluginVariable.DecodeStringArray(strValue);
+                        break;
+                    
+                    case "Webhook Username":
+                        _strDiscordWebhookUsername = strValue;
+                        break;
 
-                    /* ===== 3. Weapon Enforcers ===== */
+                    case "Webhook Avatar URL":
+                        _strDiscordWebhookAvatarUrl = strValue;
+                        break;
+                    
+                    case "Embed Colour":
+                        _intDiscordWebhookEmbedColour = int.Parse(strValue);
+                        break;
+                    
+                    case "Test Webhook Notification?":
+                        _boolTestDiscordWebhook = strValue == "Yes";
+                        break;
+
+                    /* ===== 4. Weapon Enforcers ===== */
                     case "Create new Weapon Enforcer?":
                         _boolCreateNewWeaponEnforcer = strValue == "Yes";
                         break;
@@ -382,7 +453,11 @@ namespace PRoConEvents
         {
             Logger.Debug(() => "Received OnServerInfo Event", 7);
 
-            if (_boolIsPluginEnabled) SaveCurrentWeaponEnforcers();
+            if (_boolIsPluginEnabled)
+            {
+                SaveCurrentWeaponEnforcers();
+                _csiServerInfo = csiServerInfo;
+            }
 
             Logger.Debug(() => "Exiting OnServerInfo Event", 7);
         }
@@ -506,8 +581,18 @@ namespace PRoConEvents
                         }
 
                         break;
+                    
+                    /* ===== 3. Discord Settings ===== */
+                    case "Test Webhook Notification?":
+                        if (_boolTestDiscordWebhook)
+                        {
+                            DoDiscordTestNotification();
+                            _boolTestDiscordWebhook = false;
+                        }
 
-                    /* ===== 3. Weapon Enforcers ===== */
+                        break;
+
+                    /* ===== 4. Weapon Enforcers ===== */
                     case "Create new Weapon Enforcer?":
                         if (_boolCreateNewWeaponEnforcer)
                         {
@@ -764,6 +849,40 @@ namespace PRoConEvents
             });
         }
 
+        public void DoDiscordNotification(string enforcerId, CPlayerInfo player, WeaponEnforcer.PunishmentTypes punishmentType, string reason)
+        {
+            var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
+                _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
+
+            var title = GetPluginName() + " - Report";
+            var content = string.Empty;
+
+            foreach (var line in _strArrayDiscordWebhookContent)
+            {
+                content += line.Replace("%targetName", player.SoldierName)
+                    .Replace("%enforcerId", enforcerId)
+                    .Replace("%punishmentType", punishmentType.ToString())
+                    .Replace("%punishmentReason", reason)
+                    .Replace("%serverName", _csiServerInfo.ServerName)
+                    .Replace("%mapName", _csiServerInfo.Map)
+                    .Replace("%gameMode", _csiServerInfo.GameMode);
+                content += Environment.NewLine;
+            }
+            
+            webhook.SendNotification(title, content);
+        }
+
+        private void DoDiscordTestNotification()
+        {
+            var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
+                _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
+            
+            const string content = "This is just a test to make sure you successfully set up your Discord Webhook.\n" +
+                                   "Let the monitoring of farming players begin! :)";
+            
+            webhook.SendNotification(GetPluginName() + " - Test Notification", content);
+        }
+
         #endregion
 
         #region Weapon Enforcers Helper Methods
@@ -987,38 +1106,38 @@ namespace PRoConEvents
 
             var enforcerVariables = new List<CPluginVariable>
             {
-                new CPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Enable Weapon Enforcer?",
+                new CPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Enable Weapon Enforcer?",
                     FarmingManagerUtilities.CreateEnumString<WeaponEnforcerState>(), EnforcerState.ToString()),
-                new CPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Select punishment type",
+                new CPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Select punishment type",
                     FarmingManagerUtilities.CreateEnumString<PunishmentTypes>(), Punishment.ToString()),
-                BoolYesNoPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Log to PRoCon Chat?",
+                BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Log to PRoCon Chat?",
                     BoolLogToPRoConChat),
-                BoolYesNoPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Send 70% and 90% warning messages?",
+                BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Send 70% and 90% warning messages?",
                     BoolSendPercentWarningMessages),
-                StringArrayPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Select monitored weapon",
+                StringArrayPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Select monitored weapon",
                     StrCurrentlyMonitoredWeapons),
                 BoolYesNoPluginVariable(
-                    GetFullName() + $"|#[4.{_strEnforcerId}] Persist tracked players through rounds?",
+                    GetFullName() + $"|#[5.{_strEnforcerId}] Persist tracked players through rounds?",
                     BoolPersistTrackedPlayersThroughRounds),
-                DoublePluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum allowed KDR",
+                DoublePluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum allowed KDR",
                     DoubleMaxAllowedKdr),
-                DoublePluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum allowed KPM",
+                DoublePluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum allowed KPM",
                     DoubleMaxAllowedKpm),
-                IntPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set minimum required kills",
+                IntPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set minimum required kills",
                     IntMinRequiredKills),
-                IntPluginVariable(GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum warnings",
+                IntPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum warnings",
                     IntMaximumWarnings),
                 BoolYesNoPluginVariable(
-                    GetFullName() + $"|#[4.{_strEnforcerId}] Allow higher required kills for reserved slot players?",
+                    GetFullName() + $"|#[5.{_strEnforcerId}] Allow higher required kills for reserved slot players?",
                     BoolAllowHigherTotalKillsForReservedSlotPlayers)
             };
             if (!BoolAllowHigherTotalKillsForReservedSlotPlayers) return enforcerVariables;
 
             enforcerVariables.Add(IntPluginVariable(
-                GetFullName() + $"|#[4.{_strEnforcerId}] Set minimum required kills for reserved slot players",
+                GetFullName() + $"|#[5.{_strEnforcerId}] Set minimum required kills for reserved slot players",
                 IntMinRequiredKillsForReservedSlotPlayers));
             enforcerVariables.Add(IntPluginVariable(
-                GetFullName() + $"|#[4.{_strEnforcerId}] Set maximum warnings for reserved slot players",
+                GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum warnings for reserved slot players",
                 IntMaximumWarnings));
 
             return enforcerVariables;
@@ -1158,7 +1277,7 @@ namespace PRoConEvents
             var weaponUsageCount = _dictTrackedPlayers[player.SoldierName]
                 .First(x => x.ContainsKey(weapon))[weapon];
 
-            //Compute the 25% of the minimum required kills and cast it to int
+            //Compute the 70% and 90% of the minimum required kills and cast it to int
             var minRequiredKills70Percent = (int)Math.Round(minRequiredKills * 0.70);
             var minRequiredKills90Percent = (int)Math.Round(minRequiredKills * 0.90);
 
@@ -1269,6 +1388,8 @@ namespace PRoConEvents
                 if (BoolLogToPRoConChat)
                     _plugin.LogToPRoConChat(
                         $"Enforcer #{_strEnforcerId}: Issued punishment [{Punishment.ToString()}] to {player.SoldierName} for: {reason}");
+
+                _plugin.DoDiscordNotification(_strEnforcerId, player, Punishment, reason);
             }
             else
             {
