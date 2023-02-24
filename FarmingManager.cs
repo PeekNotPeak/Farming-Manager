@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.3";
+        private const string StrPluginVersion = "0.6.4";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         public List<string> LstCurrentReservedSlotPlayers;
@@ -33,6 +33,7 @@ namespace PRoConEvents
         /* ===== 1. Farming-Manager ===== */
         private bool _boolIsPluginEnabled;
         private bool _boolDoPluginUpdateCheck;
+
         private const string StrPluginUpdateUrl =
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
 
@@ -40,14 +41,14 @@ namespace PRoConEvents
         public bool BoolSendInitialEnforcementMessage;
         public bool BoolUseAdKatsForPunishments;
         private bool _boolDoDiscordNotification;
-        
+
         /* ===== 3. Discord Settings ===== */
         private string _strDiscordWebhookUrl;
         private string _strDiscordWebhookUsername;
         private string _strDiscordWebhookAvatarUrl;
         private int _intDiscordWebhookEmbedColour;
         private string[] _strArrayDiscordWebhookContent;
-        
+
         private bool _boolTestDiscordWebhook;
 
         /* ===== 4. Weapon Enforcers ===== */
@@ -56,6 +57,7 @@ namespace PRoConEvents
         private int _intWeaponEnforcerDeletionId;
         private const string StrWeaponEnforcersSavePath = "Plugins/BF4/Farming-Manager_WeaponEnforcers.json";
         private Hashtable _hshTblHumanWeaponNames;
+
         private const string StrHumanWeaponNamesUrl =
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/weapon_names.json";
 
@@ -69,17 +71,17 @@ namespace PRoConEvents
         public FarmingManager()
         {
             /* ===== Miscellaneous ===== */
-            LstCurrentReservedSlotPlayers = new List<string>();
+            LstCurrentReservedSlotPlayers = null;
             _csiServerInfo = null;
-            
+
             /* ===== 1. FarmingManager ===== */
             _boolIsPluginEnabled = false;
-            
+
             /* ===== 2. Global Settings ===== */
             BoolSendInitialEnforcementMessage = true;
             BoolUseAdKatsForPunishments = false;
             _boolDoDiscordNotification = false;
-            
+
             /* ===== 3. Discord Settings ===== */
             _strDiscordWebhookUrl = "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks";
             _strDiscordWebhookUsername = GetPluginName();
@@ -87,16 +89,18 @@ namespace PRoConEvents
             _intDiscordWebhookEmbedColour = 1160054;
             _strArrayDiscordWebhookContent = new[]
             {
-                "> Target: %targetName%",
-                "> Enforcer: %enforcerId%",
-                "> Punishment: %punishmentType%",
-                "> Reason: %punishmentReason%",
+                "> **Target:** %targetName%",
+                "> **Enforcer:** %enforcerId%",
+                "> **Punishment:** %punishmentType%",
+                "> **Reason:** %punishmentReason%",
+                "> **Statistics:** %targetKills% / %targetDeaths% @ %targetScore% Points",
                 "> **Server:** %serverName%",
                 "> **Current Map:** %mapName%",
-                "> **Current Game-mode: **%gameMode%",
+                "> **Current Game-mode:** %gameMode%",
+                "> **Battlelog Link:** %battlelogLink%"
             };
             _boolTestDiscordWebhook = false;
-            
+
             /* ===== 4. Weapon Enforcers ===== */
             _dictWeaponEnforcersLookup = new Dictionary<string, WeaponEnforcer>();
             _boolCreateNewWeaponEnforcer = false;
@@ -245,14 +249,16 @@ namespace PRoConEvents
                 BoolUseAdKatsForPunishments);
             yield return BoolYesNoPluginVariable("2. Global Settings|Send Discord notifications?",
                 _boolDoDiscordNotification);
-            
+
             /* ===== 3. Discord Settings ===== */
             if (_boolDoDiscordNotification)
             {
                 yield return StringPluginVariable("3. Discord Settings|Webhook URL", _strDiscordWebhookUrl);
-                yield return StringArrayPluginVariable("3. Discord Settings|Webhook Content", _strArrayDiscordWebhookContent);
+                yield return StringArrayPluginVariable("3. Discord Settings|Webhook Content",
+                    _strArrayDiscordWebhookContent);
                 yield return StringPluginVariable("3. Discord Settings|Webhook Username", _strDiscordWebhookUsername);
-                yield return StringPluginVariable("3. Discord Settings|Webhook Avatar URL", _strDiscordWebhookAvatarUrl);
+                yield return StringPluginVariable("3. Discord Settings|Webhook Avatar URL",
+                    _strDiscordWebhookAvatarUrl);
                 yield return IntPluginVariable("3. Discord Settings|Embed Colour", _intDiscordWebhookEmbedColour);
                 yield return BoolYesNoPluginVariable("3. Discord Settings|Test Webhook Notification?",
                     _boolTestDiscordWebhook);
@@ -299,20 +305,20 @@ namespace PRoConEvents
                     case "Use AdKats for punishments?":
                         BoolUseAdKatsForPunishments = strValue == "Yes";
                         break;
-                    
+
                     case "Send Discord notifications?":
                         _boolDoDiscordNotification = strValue == "Yes";
                         break;
-                    
+
                     /* ===== 3. Discord Settings ===== */
                     case "Webhook URL":
                         _strDiscordWebhookUrl = strValue;
                         break;
-                    
+
                     case "Webhook Content":
                         _strArrayDiscordWebhookContent = CPluginVariable.DecodeStringArray(strValue);
                         break;
-                    
+
                     case "Webhook Username":
                         _strDiscordWebhookUsername = strValue;
                         break;
@@ -320,11 +326,11 @@ namespace PRoConEvents
                     case "Webhook Avatar URL":
                         _strDiscordWebhookAvatarUrl = strValue;
                         break;
-                    
+
                     case "Embed Colour":
                         _intDiscordWebhookEmbedColour = int.Parse(strValue);
                         break;
-                    
+
                     case "Test Webhook Notification?":
                         _boolTestDiscordWebhook = strValue == "Yes";
                         break;
@@ -378,7 +384,7 @@ namespace PRoConEvents
                         _dictWeaponEnforcersLookup[enforcerId].BoolLogToPRoConChat = strValue == "Yes";
                         break;
 
-                    case "Send 70% and 90% warning messages?":
+                    case "Send 70%, 90% and 100% warning messages?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolSendPercentWarningMessages = strValue == "Yes";
                         break;
 
@@ -581,7 +587,7 @@ namespace PRoConEvents
                         }
 
                         break;
-                    
+
                     /* ===== 3. Discord Settings ===== */
                     case "Test Webhook Notification?":
                         if (_boolTestDiscordWebhook)
@@ -750,7 +756,7 @@ namespace PRoConEvents
             {
                 try
                 {
-                    Thread.Sleep(2000);
+                    Thread.Sleep(2000); //2 Seconds
 
                     var requestHashtable = new Hashtable
                     {
@@ -805,16 +811,17 @@ namespace PRoConEvents
                 case WeaponEnforcer.PunishmentTypes.PermanentBan:
                     commandType = "admin.banPlayer";
                     break;
-
+                
                 default:
-                    return;
+                    commandType = "admin.killPlayer";
+                    break;
             }
 
             ThreadPool.QueueUserWorkItem(callBack =>
             {
                 try
                 {
-                    Thread.Sleep(2000); //3 Seconds
+                    Thread.Sleep(2000); //2 Seconds
 
                     if (punishmentType != WeaponEnforcer.PunishmentTypes.Punish ||
                         punishmentType != WeaponEnforcer.PunishmentTypes.TempBan ||
@@ -827,15 +834,15 @@ namespace PRoConEvents
                         const int time = 60 * 60; //1 Hour or 60 minutes in seconds
 
                         //Add the player to the ban list either with a time or permanent
-                        if (commandType == "admin.tempBanPlayer")
+                        if (punishmentType == WeaponEnforcer.PunishmentTypes.TempBan)
                             ExecuteCommand("procon.protected.send", "banList.add", "name", playerName, "seconds",
-                                time.ToString(CultureInfo.InvariantCulture), reason);
+                                time.ToString(), reason);
                         else
                             ExecuteCommand("procon.protected.send", "banList.add", "name", playerName, "perm", reason);
 
                         //Save the ban list and kick him
                         ExecuteCommand("procon.protected.send", "banList.save");
-                        ExecuteCommand("procon.protected.send", "admin.KickPlayer", playerName, reason);
+                        ExecuteCommand("procon.protected.send", "admin.kickPlayer", playerName, reason);
                     }
 
                     Logger.Debug(
@@ -852,6 +859,12 @@ namespace PRoConEvents
         public void DoDiscordNotification(string enforcerId, CPlayerInfo player,
             WeaponEnforcer.PunishmentTypes punishmentType, string reason)
         {
+            Logger.Debug(() => "Starting up DoDiscordNotification", 7);
+            
+            var title = $"Enforcer {enforcerId} - Punishment Report";
+            var content = string.Empty;
+            var battlelogLink = $"https://battlelog.battlefield.com/bf4/user/{player.SoldierName}/";
+
             try
             {
                 var discordWebhookThread = new Thread(() =>
@@ -859,21 +872,23 @@ namespace PRoConEvents
                     var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
                         _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
 
-                    var title = GetPluginName() + " - Report";
-                    var content = string.Empty;
-
                     foreach (var line in _strArrayDiscordWebhookContent)
                     {
-                        content += line.Replace("%targetName%", player.SoldierName)
+                        content += line
+                            .Replace("%targetName%", player.SoldierName)
                             .Replace("%enforcerId%", enforcerId)
                             .Replace("%punishmentType%", punishmentType.ToString())
                             .Replace("%punishmentReason%", reason)
+                            .Replace("%targetKills%", player.Kills.ToString())
+                            .Replace("%targetDeaths%", player.Deaths.ToString())
+                            .Replace("%targetScore%", player.Score.ToString())
                             .Replace("%serverName%", _csiServerInfo.ServerName)
                             .Replace("%mapName%", _csiServerInfo.Map)
-                            .Replace("%gameMode%", _csiServerInfo.GameMode);
+                            .Replace("%gameMode%", _csiServerInfo.GameMode)
+                            .Replace("%battlelogLink%", battlelogLink);
                         content += Environment.NewLine;
                     }
-            
+
                     webhook.SendNotification(title, content);
                 })
                 {
@@ -881,6 +896,11 @@ namespace PRoConEvents
                     IsBackground = true
                 };
                 discordWebhookThread.Start();
+
+                Logger.Debug(
+                    () =>
+                        $"Enforcer #{enforcerId}: Successfully sent Discord notification regarding player {player.SoldierName}",
+                    3);
             }
             catch (Exception e)
             {
@@ -890,28 +910,52 @@ namespace PRoConEvents
 
         private void DoDiscordTestNotification()
         {
+            Logger.Debug(() => "Starting up DoDiscordTestNotification", 7);
+            
+            const string title = "Enforcer XXX  - Punishment Report";
+            var content = string.Empty;
+            var battlelogLink = $"https://battlelog.battlefield.com/bf4/user/{GetPluginAuthor()}/";
+            
             try
             {
                 var discordWebhookThread = new Thread(() =>
                 {
                     var webhook = new DiscordWebhook(Logger, _strDiscordWebhookUrl, _strDiscordWebhookUsername,
                         _strDiscordWebhookAvatarUrl, _intDiscordWebhookEmbedColour);
-            
-                    const string content = "This is just a test to make sure you successfully set up your Discord Webhook.\n" +
-                                           "Let the monitoring of farming players begin! :)";
-            
-                    webhook.SendNotification(GetPluginName() + " - Test Notification", content);
+
+                    foreach (var line in _strArrayDiscordWebhookContent)
+                    {
+                        content += line
+                            .Replace("%targetName%", GetPluginAuthor())
+                            .Replace("%enforcerId%", "XXX")
+                            .Replace("%punishmentType%", "TEST")
+                            .Replace("%punishmentReason%", "TEST REASON")
+                            .Replace("%targetKills%", "999")
+                            .Replace("%targetDeaths%", "999")
+                            .Replace("%targetScore%", "99999")
+                            .Replace("%serverName%", _csiServerInfo.ServerName)
+                            .Replace("%mapName%", _csiServerInfo.Map)
+                            .Replace("%gameMode%", _csiServerInfo.GameMode)
+                            .Replace("%battlelogLink%", battlelogLink);
+                        content += Environment.NewLine;
+                    }
+
+                    webhook.SendNotification("Test Notification", content);
                 })
                 {
                     Name = "TestDiscordWebhookThread",
                     IsBackground = true
                 };
                 discordWebhookThread.Start();
+
+                Logger.Debug(() => "Successfully sent Discord test notification", 3);
             }
             catch (Exception e)
             {
                 Logger.Exception(e);
             }
+
+            Logger.Debug(() => "Exiting DoDiscordTestNotification", 7);
         }
 
         #endregion
@@ -1087,7 +1131,22 @@ namespace PRoConEvents
             BoolLogToPRoConChat = true;
             BoolSendPercentWarningMessages = true;
             StrCurrentlyMonitoredWeapons = new[]
-                { "AH-1Z Viper Attack Helicopter", "Type 99 MBT", "M1 Abrams MBT", "LAV-25 APC" };
+            {
+                //US
+                "AH-1Z Viper Attack Helicopter",
+                "AH-6 Little Bird Scout Helicopter",
+                "M1 Abrams MBT",
+                "LAV-25 APC",
+                "LAV-AD Anti-Air",
+                "CB90 Fast Assault Craft",
+                //CN
+                "Z-10 Attack Helicopter",
+                "Z-11W Scout Helicopter",
+                "Type 99 MBT",
+                "ZBD-09 APC",
+                "TYPE 95 AA Anti-Air",
+                "DV-15 Fast Assault Craft"
+            };
             BoolPersistTrackedPlayersThroughRounds = true;
             IntMinRequiredKills = 35;
             IntMaximumWarnings = 10;
@@ -1143,7 +1202,7 @@ namespace PRoConEvents
                     FarmingManagerUtilities.CreateEnumString<PunishmentTypes>(), Punishment.ToString()),
                 BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Log to PRoCon Chat?",
                     BoolLogToPRoConChat),
-                BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Send 70% and 90% warning messages?",
+                BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Send 70%, 90% and 100% warning messages?",
                     BoolSendPercentWarningMessages),
                 StringArrayPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Select monitored weapon",
                     StrCurrentlyMonitoredWeapons),
@@ -1169,7 +1228,7 @@ namespace PRoConEvents
                 IntMinRequiredKillsForReservedSlotPlayers));
             enforcerVariables.Add(IntPluginVariable(
                 GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum warnings for reserved slot players",
-                IntMaximumWarnings));
+                IntMaximumWarningsReservedSlotPlayers));
 
             return enforcerVariables;
         }
@@ -1392,7 +1451,7 @@ namespace PRoConEvents
 
                 if (BoolLogToPRoConChat)
                 {
-                    var message = $"Enforcer #{_strEnforcerId}:" + player.SoldierName + " > " + infoMessage;
+                    var message = $"Enforcer #{_strEnforcerId}: " + player.SoldierName + " > " + infoMessage;
                     _plugin.LogToPRoConChat(message);
                 }
             }
@@ -1439,29 +1498,32 @@ namespace PRoConEvents
 
             if (EnforcerState != WeaponEnforcerState.Virtual)
             {
-                if (BoolSendPercentWarningMessages)
+                switch (BoolSendPercentWarningMessages)
                 {
-                    var message =
-                        $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}] of minimum required kills for weapon {playerWeapon} to be punished";
+                    case true:
+                    {
+                        var message =
+                            $"You have reached {percent} [{weaponUsageCount}/{minRequiredKills}] of minimum required kills for weapon {playerWeapon} to be punished";
 
-                    if (percent == "100%")
-                        message =
-                            $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
+                        if (percent == "100%")
+                            message =
+                                $"You have exceeded the minimum required kills with {playerWeapon}. Further kills with this weapon will result in a punishment";
 
 
-                    _plugin.SendPlayerYell(soldierName, message, 10);
-                    _plugin.SendPlayerMessage(soldierName, message);
-
-                    if (BoolLogToPRoConChat)
-                        _plugin.LogToPRoConChat(
-                            $"Enforcer #{_strEnforcerId}: Sent {percent} [{weaponUsageCount}/{minRequiredKills}] " +
-                            $"warning message to '{soldierName}' for weapon '{playerWeapon}'");
+                        _plugin.SendPlayerYell(soldierName, message, 10);
+                        _plugin.SendPlayerMessage(soldierName, message);
+                        break;
+                    }
+                    case false:
+                        _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: BoolSendPercentWarningMessages is turned off. " +
+                                            $"Player '{soldierName}' will not receive {percent} warnings.");
+                        break;
                 }
-                else
-                {
-                    _plugin.Logger.Warn($"Enforcer #{_strEnforcerId}: BoolSendPercentWarningMessages is turned off. " +
-                                        $"Player '{soldierName}' will not receive {percent} warnings.");
-                }
+
+                if (BoolLogToPRoConChat)
+                    _plugin.LogToPRoConChat(
+                        $"Enforcer #{_strEnforcerId}: Warning message {percent} [{weaponUsageCount}/{minRequiredKills}] " +
+                        $"for '{soldierName}' with weapon '{playerWeapon}'");
             }
             else
             {
@@ -1880,12 +1942,6 @@ namespace PRoConEvents
 
         public void SendNotification(string title, string content)
         {
-            if (content == null)
-            {
-                _logger.Error("[DiscordWebhook] Webhook content cannot be empty. Please provide an input.");
-                return;
-            }
-
             var embed = new Hashtable
             {
                 { "title", title },
