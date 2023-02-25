@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.4";
+        private const string StrPluginVersion = "0.6.5";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         public List<string> LstCurrentReservedSlotPlayers;
@@ -1376,22 +1376,23 @@ namespace PRoConEvents
                 //Notify the player once they reach 70% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills70Percent:
                     DoPercentNotification(player.SoldierName, weapon, "70%");
-                    return;
+                    break;
 
                 //Notify the player once they reach 90% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills90Percent:
                     DoPercentNotification(player.SoldierName, weapon, "90%");
-                    return;
+                    break;
 
                 //Notify the player once they reach 100% of the minimum required kills with the specific weapon
                 case true when weaponUsageCount == minRequiredKills:
                     DoPercentNotification(player.SoldierName, weapon, "100%");
-                    return;
+                    break;
 
                 //At this point the player is beyond the minimum required kills
                 case true when weaponUsageCount > minRequiredKills:
+                    AddFirstPlayerWarningEntry(player.SoldierName);
                     HandleEnforcementPunishment(player, weapon);
-                    return;
+                    break;
             }
 
             _plugin.Logger.Debug(() => "Exiting LastCheckUpOnPlayer", 7);
@@ -1402,9 +1403,6 @@ namespace PRoConEvents
             _plugin.Logger.Debug(() => "Starting up HandleEnforcementPunishment", 7);
 
             var maximumWarnings = GetMaximumWarningsForPlayer(player.SoldierName);
-
-            AddOrIncrementPlayerWarnings(player.SoldierName);
-
             var currentWarnings = _dictTotalPlayerWarnings[player.SoldierName];
 
             var playerKdr = Math.Round(player.Kdr, 2);
@@ -1417,12 +1415,14 @@ namespace PRoConEvents
                 case true when currentWarnings == 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
                         $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | This is the first warning!";
+                    IncrementPlayerWarningCount(player.SoldierName);
                     break;
 
                 case true when currentWarnings < maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
                         $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | " +
                         $"Warning [{currentWarnings}/{maximumWarnings}]";
+                    IncrementPlayerWarningCount(player.SoldierName);
                     break;
 
                 case true when currentWarnings == maximumWarnings - 3 && playerKdr >= maxAllowedKdr:
@@ -1430,12 +1430,14 @@ namespace PRoConEvents
                         $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] " +
                         "Please change your play-style or use a different weapon | " +
                         $"Warning [{currentWarnings}/{maximumWarnings}]";
+                    IncrementPlayerWarningCount(player.SoldierName);
                     break;
 
                 case true when currentWarnings == maximumWarnings - 1 && playerKdr >= maxAllowedKdr:
                     infoMessage =
                         $"Your current KDR is too high [{playerKdr}/{maxAllowedKdr}] | " +
                         "THIS IS THE LAST WARNING BEFORE BEING PUNISHED!";
+                    IncrementPlayerWarningCount(player.SoldierName);
                     break;
 
                 //When we're here just punish em
@@ -1586,22 +1588,33 @@ namespace PRoConEvents
             _plugin.Logger.Debug(() => "Exiting ResetTrackedPlayer", 7);
         }
 
-        private void AddOrIncrementPlayerWarnings(string soldierName)
+        private void AddFirstPlayerWarningEntry(string soldierName)
         {
-            _plugin.Logger.Debug(() => "Starting up AddOrIncrementPlayerWarnings", 7);
+            _plugin.Logger.Debug(() => "Starting up AddFirstPlayerWarningEntry", 7);
 
-            //If its the first time the player has exceeded the minimum required kills start the warning counter
-            if (!_dictTotalPlayerWarnings.ContainsKey(soldierName)) _dictTotalPlayerWarnings.Add(soldierName, 1);
+            if (!_dictTotalPlayerWarnings.ContainsKey(soldierName))
+            {
+                _dictTotalPlayerWarnings.Add(soldierName, 1);
+                _plugin.Logger.Debug(
+                    () =>
+                        $"Enforcer #{_strEnforcerId}: Added first total warning for player '{soldierName}'",
+                    3);
+            }
+            
+            _plugin.Logger.Debug(() => "Exiting AddFirstPlayerWarningEntry", 7);
+        }
+        
+        private void IncrementPlayerWarningCount(string soldierName)
+        {
+            _plugin.Logger.Debug(() => "Starting up IncrementPlayerWarningCount", 7);
 
-            //If the player has already exceeded the minimum required kills, increment the warning counter
-            else _dictTotalPlayerWarnings[soldierName] += 1;
-
+            _dictTotalPlayerWarnings[soldierName] += 1;
             _plugin.Logger.Debug(
                 () =>
-                    $"Enforcer #{_strEnforcerId}: Counted up total warnings on '{soldierName}' to {_dictTotalPlayerWarnings[soldierName]}",
+                    $"Enforcer #{_strEnforcerId}: Incremented total warning count for player '{soldierName}' to '{_dictTotalPlayerWarnings[soldierName]}'",
                 3);
 
-            _plugin.Logger.Debug(() => "Exiting AddOrIncrementPlayerWarnings", 7);
+            _plugin.Logger.Debug(() => "Exiting IncrementPlayerWarningCount", 7);
         }
 
         private int GetMinimumRequiredKillsForPlayer(string soldierName)
@@ -1615,7 +1628,7 @@ namespace PRoConEvents
 
             _plugin.Logger.Debug(
                 () =>
-                    $"Enforcer #{_strEnforcerId}: Minimum required kills for player '{soldierName}' are {minRequiredKills}",
+                    $"Enforcer #{_strEnforcerId}: Minimum required kills for player '{soldierName}' are '{minRequiredKills}'",
                 3);
 
             _plugin.Logger.Debug(() => "Exiting GetMinimumRequiredKillsForPlayer", 7);
@@ -1633,7 +1646,7 @@ namespace PRoConEvents
                 maximumWarnings = IntMaximumWarningsReservedSlotPlayers;
 
             _plugin.Logger.Debug(
-                () => $"Enforcer #{_strEnforcerId}: Maximum warnings for player '{soldierName}' are {maximumWarnings}",
+                () => $"Enforcer #{_strEnforcerId}: Maximum warnings for player '{soldierName}' are '{maximumWarnings}'",
                 3);
 
             _plugin.Logger.Debug(() => "Exiting GetMaximumWarningsForPlayer", 7);
@@ -1643,7 +1656,7 @@ namespace PRoConEvents
 
         private string GetFullName()
         {
-            return $"4.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
+            return $"5.{_strEnforcerId} Weapon Enforcer with ID #{_strEnforcerId}";
         }
     }
 
