@@ -24,7 +24,7 @@ namespace PRoConEvents
 
         /* ===== Miscellaneous ===== */
         private const string StrPluginName = "Farming-Manager";
-        private const string StrPluginVersion = "0.6.5";
+        private const string StrPluginVersion = "0.7.0";
         private const string StrPluginAuthor = "PeekNotPeak";
         private const string StrPluginWebsite = "github.com/PeekNotPeak/Farming-Manager";
         public List<string> LstCurrentReservedSlotPlayers;
@@ -38,7 +38,6 @@ namespace PRoConEvents
             "https://raw.githubusercontent.com/PeekNotPeak/Farming-Manager/master/version.json";
 
         /* ===== 2. Global Settings ===== */
-        public bool BoolSendInitialEnforcementMessage;
         public bool BoolUseAdKatsForPunishments;
         private bool _boolDoDiscordNotification;
 
@@ -78,7 +77,6 @@ namespace PRoConEvents
             _boolIsPluginEnabled = false;
 
             /* ===== 2. Global Settings ===== */
-            BoolSendInitialEnforcementMessage = true;
             BoolUseAdKatsForPunishments = false;
             _boolDoDiscordNotification = false;
 
@@ -243,8 +241,6 @@ namespace PRoConEvents
             yield return BoolPluginVariable("1. Farming-Manager|Check for plugin updates?", _boolDoPluginUpdateCheck);
 
             /* ===== 2. Global Settings ===== */
-            yield return BoolYesNoPluginVariable("2. Global Settings|Send initial enforcement message?",
-                BoolSendInitialEnforcementMessage);
             yield return BoolYesNoPluginVariable("2. Global Settings|Use AdKats for punishments?",
                 BoolUseAdKatsForPunishments);
             yield return BoolYesNoPluginVariable("2. Global Settings|Send Discord notifications?",
@@ -298,10 +294,6 @@ namespace PRoConEvents
                         break;
 
                     /* ===== 2. Global Settings ===== */
-                    case "Send initial enforcement message?":
-                        BoolSendInitialEnforcementMessage = strValue == "Yes";
-                        break;
-
                     case "Use AdKats for punishments?":
                         BoolUseAdKatsForPunishments = strValue == "Yes";
                         break;
@@ -383,6 +375,15 @@ namespace PRoConEvents
                     case "Log to PRoCon Chat?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolLogToPRoConChat = strValue == "Yes";
                         break;
+                    
+                    case "Persist tracked players through rounds?":
+                        _dictWeaponEnforcersLookup[enforcerId].BoolPersistTrackedPlayersThroughRounds =
+                            strValue == "Yes";
+                        break;
+                    
+                    case "Send initial enforcement message?":
+                        _dictWeaponEnforcersLookup[enforcerId].BoolSendInitialEnforcementMessage = strValue == "Yes";
+                        break;
 
                     case "Send 70%, 90% and 100% warning messages?":
                         _dictWeaponEnforcersLookup[enforcerId].BoolSendPercentWarningMessages = strValue == "Yes";
@@ -391,11 +392,6 @@ namespace PRoConEvents
                     case "Select monitored weapon":
                         _dictWeaponEnforcersLookup[enforcerId].StrCurrentlyMonitoredWeapons =
                             CPluginVariable.DecodeStringArray(strValue);
-                        break;
-
-                    case "Persist tracked players through rounds?":
-                        _dictWeaponEnforcersLookup[enforcerId].BoolPersistTrackedPlayersThroughRounds =
-                            strValue == "Yes";
                         break;
 
                     case "Set maximum allowed KPM":
@@ -756,7 +752,7 @@ namespace PRoConEvents
             {
                 try
                 {
-                    Thread.Sleep(2000); //2 Seconds
+                    Thread.Sleep(3000); //3 Seconds
 
                     var requestHashtable = new Hashtable
                     {
@@ -797,11 +793,11 @@ namespace PRoConEvents
                     break;
 
                 case WeaponEnforcer.PunishmentTypes.Kill:
-                    commandType = "admin.killPlayer";
+                    commandType = "admin.killPlayer"; //works
                     break;
 
                 case WeaponEnforcer.PunishmentTypes.Kick:
-                    commandType = "admin.kickPlayer";
+                    commandType = "admin.kickPlayer"; //works
                     break;
 
                 case WeaponEnforcer.PunishmentTypes.TempBan:
@@ -821,7 +817,7 @@ namespace PRoConEvents
             {
                 try
                 {
-                    Thread.Sleep(2000); //2 Seconds
+                    Thread.Sleep(3000); //3 Seconds
 
                     if (punishmentType != WeaponEnforcer.PunishmentTypes.Punish ||
                         punishmentType != WeaponEnforcer.PunishmentTypes.TempBan ||
@@ -1108,6 +1104,7 @@ namespace PRoConEvents
         public WeaponEnforcerState EnforcerState;
         public PunishmentTypes Punishment;
         public bool BoolLogToPRoConChat;
+        public bool BoolSendInitialEnforcementMessage;
         public bool BoolSendPercentWarningMessages;
         public string[] StrCurrentlyMonitoredWeapons;
         public bool BoolPersistTrackedPlayersThroughRounds;
@@ -1129,6 +1126,7 @@ namespace PRoConEvents
 
             EnforcerState = WeaponEnforcerState.Disabled;
             BoolLogToPRoConChat = true;
+            BoolSendInitialEnforcementMessage = true;
             BoolSendPercentWarningMessages = true;
             StrCurrentlyMonitoredWeapons = new[]
             {
@@ -1202,13 +1200,16 @@ namespace PRoConEvents
                     FarmingManagerUtilities.CreateEnumString<PunishmentTypes>(), Punishment.ToString()),
                 BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Log to PRoCon Chat?",
                     BoolLogToPRoConChat),
+                BoolYesNoPluginVariable(
+                    GetFullName() + $"|#[5.{_strEnforcerId}] Persist tracked players through rounds?",
+                    BoolPersistTrackedPlayersThroughRounds),
+                BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Send initial enforcement message?",
+                    BoolSendInitialEnforcementMessage),
                 BoolYesNoPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Send 70%, 90% and 100% warning messages?",
                     BoolSendPercentWarningMessages),
                 StringArrayPluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Select monitored weapon",
                     StrCurrentlyMonitoredWeapons),
-                BoolYesNoPluginVariable(
-                    GetFullName() + $"|#[5.{_strEnforcerId}] Persist tracked players through rounds?",
-                    BoolPersistTrackedPlayersThroughRounds),
+                
                 DoublePluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum allowed KDR",
                     DoubleMaxAllowedKdr),
                 DoublePluginVariable(GetFullName() + $"|#[5.{_strEnforcerId}] Set maximum allowed KPM",
@@ -1297,7 +1298,7 @@ namespace PRoConEvents
                     _plugin.LogToPRoConChat(
                         $"Enforcer #{_strEnforcerId}: Now monitoring '{soldierName}' for weapon '{playerWeapon}'");
 
-                if (_plugin.BoolSendInitialEnforcementMessage)
+                if (BoolSendInitialEnforcementMessage)
                     _plugin.SendPlayerTell(soldierName,
                         $"You are now being monitored by Enforcer #{_strEnforcerId} for weapon {playerWeapon}", 10);
 
